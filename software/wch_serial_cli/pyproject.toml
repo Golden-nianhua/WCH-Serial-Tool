@@ -1,0 +1,9 @@
+[project]
+name = "wch-serial-cli"
+version = "0.1.0"
+description = "WCH Serial Tool WinUSB configuration CLI"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false

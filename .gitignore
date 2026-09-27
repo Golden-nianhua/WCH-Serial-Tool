@@ -1,0 +1,8 @@
+software/ch570q_firmware/build/
+software/ch570q_firmware/obj/
+software/ch570q_firmware/.mrs/
+software/wch_serial_cli/.venv/
+software/wch_serial_cli/__pycache__/
+software/ch570q_tool/
+software/ch591d_firmware/obj/
+*.pyc

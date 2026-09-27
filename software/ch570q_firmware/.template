@@ -1,0 +1,17 @@
+Mcu Type=CH570/2
+Address=0x00000000
+Target Path=obj/ch570q_firmware.hex
+Erase All=true
+Program=true
+Verify=true
+Reset=true
+
+Vendor=WCH
+Link=WCH-Link
+Toolchain=RISC-V
+Series=CH572
+RTOS=NoneOS
+MCU=CH572Q
+Description=Website: https://www.wch.cn/products/CH572.html?\n ROM(byte): 240K, SRAM(byte): 12K, CHIP PINS: 10, GPIO PORTS: 5.\nThe CH572 is a RISC-V MCU microcontroller with integrated 2.4G wireless communication. On-chip integration of 2Mbps low power Bluetooth BLE communication mode Block, USB full speed controller and transceiver, voltage comparator CMP, key detection module, SPI, serial port, I2C and other rich peripheral resources. CH572 has built-in LDO5V regulator to generate 3.3V, support single 3.3V or single 5V power supply, support single or dual wire simulation debugging, Suitable for 2.4G wireless communication applications and simple Bluetooth applications with low pin counts. CH570 is a low power 2.4G wireless communication MCU, does not support Bluetooth, other modules refer to CH572.
+
+PeripheralVersion=1.4
