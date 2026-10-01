@@ -69,27 +69,35 @@ Commands:
 | Clear pairing | `0x05` | none | none |
 | Get RF configuration | `0x06` | none | four bytes; byte 0 is TX power |
 | Set RF configuration | `0x07` | four bytes | none |
+| Get RSSI | `0x0B` | none | signed RSSI byte in dBm |
 | Software reset | `0x11` | none | none |
 | Remote get information | `0x21` | none | paired RF node information |
 | Remote get status | `0x22` | none | paired RF node status |
 | Remote get configuration | `0x23` | none | paired RF node configuration |
 | Remote set configuration | `0x24` | four bytes | none |
 | Remote reset | `0x25` | none | none |
+| Remote get RSSI | `0x26` | none | signed RSSI byte in dBm |
 
 Remote commands are delivered through the node's existing 10 ms status poll.
 The receiver repeats one transaction until its response arrives, and the node
 deduplicates it by transaction ID. Remote reset is performed only after the
 receiver acknowledges the successful response.
 
+The TX-power setting is stored in its own reserved flash page at `0x3A000` and
+survives reset. Pairing metadata remains in the separate page at `0x3B000`.
+
 The TX-power byte uses the WCH RF encoding. Common values are `0x12` for
 0 dBm, `0x18` for +2 dBm, `0x1F` for +4 dBm and `0x2D` for +6 dBm. The power
-setting currently applies immediately and is not stored in flash.
+setting applies immediately and is stored in flash.
 
 PA7 drives an active-high LED:
 
 - fast blink: waiting for USB enumeration
 - short pulse once per second: USB configured and idle
 - solid 40 ms pulse: USB data activity
+- RF node fast blink: not paired
+- RF node double pulse: paired but not connected
+- RF node short pulse once per second: connected
 
 The first 8 KB of flash is reserved. A boot jump stub at `0x0000` immediately
 jumps to the normal CH572 application startup at `0x2000`. Both are linked into

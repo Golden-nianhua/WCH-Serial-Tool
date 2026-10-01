@@ -116,7 +116,7 @@ void ConfigService_Task(void)
     else if(packet.command == CFG_CMD_GET_INFO)
     {
         app_info_t info = {
-            0, 4, 6, 0x72, 2, 1, CFG_PROTOCOL_VERSION, 0,
+            0, 4, 7, 0x72, 2, 1, CFG_PROTOCOL_VERSION, 0,
             GetSysClock(), IAP_APP_START, IAP_APP_END,
             R8_CHIP_ID, (R8_GLOB_CFG_INFO & RB_CFG_BOOT_EN) != 0,
             {0}, {0}
@@ -189,8 +189,10 @@ void ConfigService_Task(void)
         else
         {
             const rf_config_t *config = (const rf_config_t *)packet.payload;
-            RfTransport_SetTxPower(config->tx_power);
-            Config_MakeResponse(&packet, &packet, CFG_STATUS_OK, 0, 0);
+            uint8_t result = RfTransport_SetTxPower(config->tx_power);
+            Config_MakeResponse(&packet, &packet,
+                                result ? CFG_STATUS_FLASH : CFG_STATUS_OK,
+                                0, 0);
         }
     }
     else if(packet.command == CFG_CMD_START_SCAN)
@@ -224,6 +226,14 @@ void ConfigService_Task(void)
                                 0, 0);
         }
     }
+    else if(packet.command == CFG_CMD_GET_RSSI)
+    {
+        int8_t rssi;
+        uint8_t result = RfTransport_GetRssi(&rssi);
+        Config_MakeResponse(&packet, &packet,
+                            result ? CFG_STATUS_STATE : CFG_STATUS_OK,
+                            &rssi, result ? 0 : sizeof(rssi));
+    }
     else if(packet.command == CFG_CMD_RESET)
     {
         Config_MakeResponse(&packet, &packet, CFG_STATUS_OK, 0, 0);
@@ -237,7 +247,7 @@ void ConfigService_Task(void)
         reset_time = SYS_GetSysTickCnt() + GetSysClock() / 10U;
     }
     else if(packet.command >= CFG_CMD_REMOTE_GET_INFO &&
-            packet.command <= CFG_CMD_REMOTE_RESET)
+            packet.command <= CFG_CMD_REMOTE_GET_RSSI)
     {
         uint8_t remote_status = CFG_STATUS_OK;
         uint8_t remote_length = CFG_PAYLOAD_SIZE;

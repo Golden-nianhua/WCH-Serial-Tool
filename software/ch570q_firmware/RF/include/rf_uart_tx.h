@@ -23,6 +23,7 @@ extern "C"
 #define  RESEND_COUNT        40
 
 #define  BOUND_INFO_FLASH_ADDR         (1024*236)
+#define  RF_CONFIG_FLASH_ADDR          (1024*232)
 
 extern uint32_t  hostRfRxFlag;
 extern struct simple_buf *hostRfBuf;
@@ -36,6 +37,9 @@ void RF_UartTxInit( void );
 void RF_StatusQuery( void );
 void RF_GetPairStatus(uint8_t *paired, uint8_t *state, uint16_t *server_data);
 uint8_t RF_ClearPairing(void);
+uint8_t RF_TxGetRssi(int8_t *rssi);
+uint8_t RF_LoadTxPower(uint8_t *value);
+uint8_t RF_SaveTxPower(uint8_t value);
 uint8_t RF_RemoteTakeRequest(uint8_t *transaction, uint8_t *command,
                              uint8_t *payload, uint8_t *length);
 void RF_RemoteSetResponse(uint8_t transaction, uint8_t command,

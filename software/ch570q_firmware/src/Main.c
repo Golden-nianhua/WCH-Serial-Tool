@@ -59,10 +59,13 @@ static void led_task(void)
         RfTransport_GetPairStatus(&paired, &pair_state, &server_data);
         (void)pair_state;
         (void)server_data;
-        if(paired)
+        if(!paired)
+            led_write(((now / 250U) & 1U) == 0U);
+        else if(pair_state == BOUND_STATUS_EST)
             led_write((now % 1000U) < 60U);
         else
-            led_write(((now / 250U) & 1U) == 0U);
+            led_write((now % 1000U) < 60U ||
+                      ((now % 1000U) >= 160U && (now % 1000U) < 220U));
         return;
     }
 

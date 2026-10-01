@@ -54,6 +54,7 @@ void RF_ScanStart(void);
 uint8_t RF_ScanIsActive(void);
 uint8_t RF_ScanGetResults(rf_scan_device_t *devices, uint8_t capacity);
 uint8_t RF_ScanSelect(const uint8_t device_id[6]);
+uint8_t RF_RxGetRssi(int8_t *rssi);
 uint8_t RF_RemoteExchange(uint8_t command, const uint8_t *request,
                           uint8_t request_length, uint8_t *status,
                           uint8_t *response, uint8_t *response_length);

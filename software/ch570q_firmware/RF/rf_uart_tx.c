@@ -59,6 +59,17 @@ static volatile uint8_t remoteResponseSent;
 static volatile uint8_t remoteResetAfterAck;
 static volatile uint8_t remoteResetReady;
 static uint8_t remoteTransaction;
+static int8_t lastRssi;
+static uint8_t rssiValid;
+
+#define RF_CONFIG_INFO_HEAD 0xA55A
+
+typedef struct __attribute__((packed))
+{
+    uint16_t head;
+    uint8_t txPower;
+    uint8_t reserved;
+} rfConfigInfo_t;
 
 static void rfProcessRx( rfPackage_t *pPkt );
 static void rfProcessTx( void );
@@ -165,6 +176,7 @@ __HIGH_CODE
 static void rf_disconnect( void )
 {
     gBoundStatus = BOUND_STATUS_IDLE;
+    rssiValid = 0;
     UART_SetTimer( ADV_INTERVAL );
     rf_tx_set_sync_word( AA );
     rf_tx_set_frequency( DEF_FREQUENCY );
@@ -226,6 +238,8 @@ static void rfProcessRx( rfPackage_t *pPkt )
 {
     if( gTxDataSeq == pPkt->seq )
     {
+        lastRssi = *(int8_t *)((uint8_t *)pPkt + pPkt->length + 4U);
+        rssiValid = 1;
         if( pPkt->type == PKT_DATA_RSP_ACK )
         {
             // ���ݷ��ͳɹ�
@@ -538,6 +552,7 @@ void RF_UartTxInit( void )
     remoteResetAfterAck = 0;
     remoteResetReady = 0;
     remoteTransaction = 0;
+    rssiValid = 0;
     rf_buffer_create(&pRfBuf);
     GetMACAddress(mac);
     memcpy(deviceId, mac, sizeof(deviceId));
@@ -565,6 +580,40 @@ void RF_GetPairStatus(uint8_t *paired, uint8_t *state, uint16_t *server_data)
 uint8_t RF_ClearPairing(void)
 {
     return (uint8_t)FLASH_ROM_ERASE(BOUND_INFO_FLASH_ADDR, 4096);
+}
+
+uint8_t RF_TxGetRssi(int8_t *rssi)
+{
+    if(gBoundStatus != BOUND_STATUS_EST || !rssiValid)
+        return 1;
+    *rssi = lastRssi;
+    return 0;
+}
+
+uint8_t RF_LoadTxPower(uint8_t *value)
+{
+    rfConfigInfo_t *config = (rfConfigInfo_t *)RF_CONFIG_FLASH_ADDR;
+
+    if(config->head != RF_CONFIG_INFO_HEAD)
+        return 1;
+    *value = config->txPower;
+    return 0;
+}
+
+uint8_t RF_SaveTxPower(uint8_t value)
+{
+    rfConfigInfo_t config __attribute__((aligned(4))) = {
+        RF_CONFIG_INFO_HEAD, value, 0
+    };
+    rfConfigInfo_t *saved = (rfConfigInfo_t *)RF_CONFIG_FLASH_ADDR;
+    uint8_t result;
+
+    if(saved->head == RF_CONFIG_INFO_HEAD && saved->txPower == value)
+        return 0;
+    result = (uint8_t)FLASH_ROM_ERASE(RF_CONFIG_FLASH_ADDR, 4096);
+    if(!result)
+        result = (uint8_t)FLASH_ROM_WRITE(RF_CONFIG_FLASH_ADDR, &config, 4);
+    return result;
 }
 
 uint8_t RF_RemoteTakeRequest(uint8_t *transaction, uint8_t *command,

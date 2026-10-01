@@ -81,7 +81,7 @@ static void remote_task(void)
 
         memset(info, 0, sizeof(*info));
         info->fw_minor = 4;
-        info->fw_patch = 6;
+        info->fw_patch = 7;
         info->hardware = 0x72;
         info->rf_ready = 1;
         info->protocol = CFG_PROTOCOL_VERSION;
@@ -127,12 +127,20 @@ static void remote_task(void)
     {
         if(length != sizeof(remote_config_t))
             status = CFG_STATUS_BAD_LENGTH;
-        else
-            RfTransport_SetTxPower(((remote_config_t *)data)->tx_power);
+        else if(RfTransport_SetTxPower(
+                    ((remote_config_t *)data)->tx_power))
+            status = CFG_STATUS_FLASH;
     }
     else if(command == CFG_CMD_REMOTE_RESET)
     {
         reset_after_ack = 1;
+    }
+    else if(command == CFG_CMD_REMOTE_GET_RSSI)
+    {
+        if(RfTransport_GetRssi((int8_t *)data))
+            status = CFG_STATUS_STATE;
+        else
+            response_length = 1;
     }
     else
     {
@@ -156,6 +164,11 @@ static uint8_t set_role(rf_transport_role_t role, uint8_t usb_active)
     usb_pending_length = 0;
 
     RFRole_Init();
+    {
+        uint8_t tx_power;
+        if(!RF_LoadTxPower(&tx_power))
+            gTxParam.txPowerVal = (int8_t)tx_power;
+    }
     if(role == RF_TRANSPORT_USB_RECEIVER)
     {
         RF_UartRxInit();
@@ -302,9 +315,19 @@ uint8_t RfTransport_GetTxPower(void)
     return (uint8_t)gTxParam.txPowerVal;
 }
 
-void RfTransport_SetTxPower(uint8_t value)
+uint8_t RfTransport_SetTxPower(uint8_t value)
 {
     gTxParam.txPowerVal = (int8_t)value;
+    return RF_SaveTxPower(value);
+}
+
+uint8_t RfTransport_GetRssi(int8_t *rssi)
+{
+    if(current_role == RF_TRANSPORT_USB_RECEIVER)
+        return RF_RxGetRssi(rssi);
+    if(current_role == RF_TRANSPORT_UART_NODE)
+        return RF_TxGetRssi(rssi);
+    return 1;
 }
 
 uint32_t RfTransport_GetUartBaud(void)

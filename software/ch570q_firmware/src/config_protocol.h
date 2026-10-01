@@ -18,6 +18,7 @@
 #define CFG_CMD_START_SCAN    0x08
 #define CFG_CMD_GET_SCAN      0x09
 #define CFG_CMD_PAIR_DEVICE   0x0a
+#define CFG_CMD_GET_RSSI      0x0b
 #define CFG_CMD_RESET         0x11
 #define CFG_CMD_ENTER_ISP     0x12
 #define CFG_CMD_REMOTE_GET_INFO   0x21
@@ -25,6 +26,7 @@
 #define CFG_CMD_REMOTE_GET_CONFIG 0x23
 #define CFG_CMD_REMOTE_SET_CONFIG 0x24
 #define CFG_CMD_REMOTE_RESET      0x25
+#define CFG_CMD_REMOTE_GET_RSSI   0x26
 #define CFG_STATUS_OK          0
 #define CFG_STATUS_BAD_PACKET  1
 #define CFG_STATUS_BAD_COMMAND 2

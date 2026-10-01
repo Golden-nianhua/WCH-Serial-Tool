@@ -26,7 +26,8 @@ uint8_t RfTransport_GetScanResults(rf_scan_device_t *devices,
                                    uint8_t capacity);
 uint8_t RfTransport_PairDevice(const uint8_t device_id[6]);
 uint8_t RfTransport_GetTxPower(void);
-void RfTransport_SetTxPower(uint8_t value);
+uint8_t RfTransport_SetTxPower(uint8_t value);
+uint8_t RfTransport_GetRssi(int8_t *rssi);
 uint32_t RfTransport_GetUartBaud(void);
 uint8_t RfTransport_RemoteCommand(uint8_t command, const uint8_t *request,
                                   uint8_t request_length, uint8_t *status,

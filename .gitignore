@@ -6,3 +6,6 @@ software/wch_serial_cli/__pycache__/
 software/ch570q_tool/
 software/ch591d_firmware/obj/
 *.pyc
+/img/
+/drawio/
+/index.html

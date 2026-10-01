@@ -62,6 +62,8 @@ static uint8_t scanTarget[6];
 static volatile uint8_t remoteState;
 static uint8_t remoteTransaction;
 static uint32_t remoteDeadline;
+static int8_t lastRssi;
+static uint8_t rssiValid;
 
 #define REMOTE_STATE_IDLE     0
 #define REMOTE_STATE_PENDING  1
@@ -199,6 +201,7 @@ static void rf_disconnect( void )
     PRINT("disconnect.\n" );
     RFRole_Shut( );
     gBoundStatus = BOUND_STATUS_IDLE;
+    rssiValid = 0;
     gRxDataStatus = DATA_STATUS_START;
     TMR_ITCfg(DISABLE, TMR_IT_CYC_END); // �ر��ж�
 
@@ -319,6 +322,8 @@ static void rfProcessRx( rfPackage_t *pPkt )
     else
     {
         rfRsp_t *pRsp_t = (rfRsp_t *)&gTxBuf.TxBuf[PKT_HEAD_LEN];
+        lastRssi = *(int8_t *)((uint8_t *)pPkt + pPkt->length + 4U);
+        rssiValid = 1;
         if( pPkt->type == PKT_CMD_GET_STATUS )
         {
             gRfStatus = RF_STATUS_TX;
@@ -565,6 +570,7 @@ void RF_UartRxInit( void )
     scanCount = 0;
     scanTargetValid = 0;
     remoteState = REMOTE_STATE_IDLE;
+    rssiValid = 0;
     PRINT("----------------- rf uart rx mode -----------------\n");
     gRxDataStatus = DATA_STATUS_IDLE;
     rf_buffer_create(&pRfBuf);
@@ -617,6 +623,14 @@ uint8_t RF_ScanSelect(const uint8_t device_id[6])
         }
     }
     return 1;
+}
+
+uint8_t RF_RxGetRssi(int8_t *rssi)
+{
+    if(gBoundStatus != BOUND_STATUS_EST || !rssiValid)
+        return 1;
+    *rssi = lastRssi;
+    return 0;
 }
 
 uint8_t RF_RemoteExchange(uint8_t command, const uint8_t *request,

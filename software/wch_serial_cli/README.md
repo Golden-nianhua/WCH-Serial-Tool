@@ -23,11 +23,13 @@ uv run wch_serial_cli.py pair
 uv run wch_serial_cli.py clear-pair
 uv run wch_serial_cli.py rf-config
 uv run wch_serial_cli.py set-power 0x12
-uv run wch_serial_cli.py remote-info
-uv run wch_serial_cli.py remote-status
-uv run wch_serial_cli.py remote-config
-uv run wch_serial_cli.py remote-set-config 0x12
-uv run wch_serial_cli.py remote-reset
+uv run wch_serial_cli.py rssi
+uv run wch_serial_cli.py info --remote
+uv run wch_serial_cli.py status --remote
+uv run wch_serial_cli.py rf-config --remote
+uv run wch_serial_cli.py set-power 0x12 --remote
+uv run wch_serial_cli.py rssi --remote
+uv run wch_serial_cli.py reset --remote
 uv run wch_serial_cli.py scan
 uv run wch_serial_cli.py scan-results
 uv run wch_serial_cli.py connect 0
@@ -52,6 +54,11 @@ Common WCH TX-power codes:
 0x1F = +4 dBm
 0x2D = +6 dBm
 ```
+
+The configured TX power is saved in flash on both the receiver and RF node.
+The `rssi` command reports node-to-receiver signal strength. Use
+`rssi --remote` for receiver-to-node signal strength. RSSI is available only
+while the RF link is connected.
 
 The `isp` command disconnects USB, erases the 4 KB block containing the
 application entry at address zero, and resets the CH572. The factory bootloader

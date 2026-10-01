@@ -31,6 +31,7 @@ CMD_SET_RF_CONFIG = 0x07
 CMD_START_SCAN = 0x08
 CMD_GET_SCAN = 0x09
 CMD_PAIR_DEVICE = 0x0A
+CMD_GET_RSSI = 0x0B
 CMD_RESET = 0x11
 CMD_ENTER_ISP = 0x12
 CMD_REMOTE_GET_INFO = 0x21
@@ -38,6 +39,16 @@ CMD_REMOTE_GET_STATUS = 0x22
 CMD_REMOTE_GET_CONFIG = 0x23
 CMD_REMOTE_SET_CONFIG = 0x24
 CMD_REMOTE_RESET = 0x25
+CMD_REMOTE_GET_RSSI = 0x26
+
+REMOTE_COMMANDS = {
+    CMD_GET_INFO: CMD_REMOTE_GET_INFO,
+    CMD_GET_STATUS: CMD_REMOTE_GET_STATUS,
+    CMD_GET_RF_CONFIG: CMD_REMOTE_GET_CONFIG,
+    CMD_SET_RF_CONFIG: CMD_REMOTE_SET_CONFIG,
+    CMD_GET_RSSI: CMD_REMOTE_GET_RSSI,
+    CMD_RESET: CMD_REMOTE_RESET,
+}
 
 STATUS_PENDING = 8
 STATUS_TIMEOUT = 9
@@ -233,8 +244,14 @@ def remote_command(device, code, payload=b""):
         time.sleep(0.02)
 
 
-def show_info(device, code=CMD_GET_INFO):
-    data = remote_command(device, code) if code == CMD_REMOTE_GET_INFO else command(device, code)
+def target_command(device, code, remote=False, payload=b""):
+    if remote:
+        return remote_command(device, REMOTE_COMMANDS[code], payload)
+    return command(device, code, payload)
+
+
+def show_info(device, remote=False):
+    data = target_command(device, CMD_GET_INFO, remote)
     major, minor, patch, hardware, cdc_ports, rf_ready, protocol, _, clock, start, end = struct.unpack_from("<8B3I", data)
     print(f"firmware: {major}.{minor}.{patch}")
     print(f"hardware: CH5{hardware:02X}")
@@ -254,8 +271,8 @@ def show_info(device, code=CMD_GET_INFO):
         print(f"factory bootloader: {'enabled' if boot_enabled else 'disabled'}")
 
 
-def show_status(device, code=CMD_GET_STATUS):
-    data = remote_command(device, code) if code == CMD_REMOTE_GET_STATUS else command(device, code)
+def show_status(device, remote=False):
+    data = target_command(device, CMD_GET_STATUS, remote)
     configured, rf_ready, role, paired, state, _, server, uart_baud, rf_baud = struct.unpack(
         "<6BHII", data
     )
@@ -276,10 +293,16 @@ def show_pair_status(device):
     print(f"server data: 0x{server:04X}")
 
 
-def show_rf_config(device, code=CMD_GET_RF_CONFIG):
-    data = remote_command(device, code) if code == CMD_REMOTE_GET_CONFIG else command(device, code)
+def show_rf_config(device, remote=False):
+    data = target_command(device, CMD_GET_RF_CONFIG, remote)
     tx_power, _, _, _ = struct.unpack("<4B", data)
     print(f"TX power code: 0x{tx_power:02X}")
+
+
+def show_rssi(device, remote=False):
+    rssi, = struct.unpack("<b", target_command(device, CMD_GET_RSSI, remote))
+    direction = "receiver to node" if remote else "node to receiver"
+    print(f"{direction} RSSI: {rssi} dBm")
 
 
 def get_scan_results(device):
@@ -313,10 +336,13 @@ def main():
     parser.add_argument("--device", type=int,
                         help="select one device by list index; default is all devices")
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("list", "info", "status", "pair-status", "pair", "clear-pair",
-                 "rf-config", "scan-results", "reset", "isp", "remote-info",
-                 "remote-status", "remote-config", "remote-reset"):
+    for name in ("list", "pair-status", "pair", "clear-pair",
+                 "scan-results", "isp"):
         sub.add_parser(name)
+    for name in ("info", "status", "rf-config", "rssi", "reset"):
+        target = sub.add_parser(name)
+        target.add_argument("--remote", action="store_true",
+                            help="run the command on the paired RF node")
     scan = sub.add_parser("scan")
     scan.add_argument("--seconds", type=float, default=2.0,
                       help="scan duration before displaying results")
@@ -326,9 +352,8 @@ def main():
     power = sub.add_parser("set-power")
     power.add_argument("value", type=parse_number,
                        help="WCH TX power code, for example 0x12 or 0x2D")
-    remote_power = sub.add_parser("remote-set-config")
-    remote_power.add_argument("value", type=parse_number,
-                              help="remote WCH TX power code")
+    power.add_argument("--remote", action="store_true",
+                       help="set power on the paired RF node")
     args = parser.parse_args()
 
     if args.action == "list":
@@ -349,12 +374,13 @@ def main():
         for position, (index, path) in enumerate(selected):
             print(f"[{index}] {path}")
             with Device(path) as device:
-                if args.action == "info": show_info(device)
-                elif args.action == "status": show_status(device)
+                if args.action == "info": show_info(device, args.remote)
+                elif args.action == "status": show_status(device, args.remote)
                 elif args.action == "pair-status": show_pair_status(device)
                 elif args.action == "pair": command(device, CMD_START_PAIR); print("pairing restarted")
                 elif args.action == "clear-pair": command(device, CMD_CLEAR_PAIR); print("pairing cleared")
-                elif args.action == "rf-config": show_rf_config(device)
+                elif args.action == "rf-config": show_rf_config(device, args.remote)
+                elif args.action == "rssi": show_rssi(device, args.remote)
                 elif args.action == "scan-results": show_scan_results(device)
                 elif args.action == "scan":
                     command(device, CMD_START_SCAN)
@@ -369,19 +395,14 @@ def main():
                     command(device, CMD_PAIR_DEVICE, devices[args.index][0])
                     print(f"pairing with RF node {args.index}")
                 elif args.action == "set-power":
-                    command(device, CMD_SET_RF_CONFIG, struct.pack("<4B", args.value, 0, 0, 0))
-                    print(f"TX power set to 0x{args.value:02X}")
-                elif args.action == "remote-info": show_info(device, CMD_REMOTE_GET_INFO)
-                elif args.action == "remote-status": show_status(device, CMD_REMOTE_GET_STATUS)
-                elif args.action == "remote-config": show_rf_config(device, CMD_REMOTE_GET_CONFIG)
-                elif args.action == "remote-set-config":
-                    remote_command(device, CMD_REMOTE_SET_CONFIG,
-                                   struct.pack("<4B", args.value, 0, 0, 0))
-                    print(f"remote TX power set to 0x{args.value:02X}")
-                elif args.action == "remote-reset":
-                    remote_command(device, CMD_REMOTE_RESET)
-                    print("remote node resetting")
-                elif args.action == "reset": command(device, CMD_RESET); print("resetting")
+                    payload = struct.pack("<4B", args.value, 0, 0, 0)
+                    target_command(device, CMD_SET_RF_CONFIG,
+                                   args.remote, payload)
+                    target = "remote node" if args.remote else "receiver"
+                    print(f"{target} TX power set to 0x{args.value:02X}")
+                elif args.action == "reset":
+                    target_command(device, CMD_RESET, args.remote)
+                    print("remote node resetting" if args.remote else "resetting")
                 elif args.action == "isp":
                     command(device, CMD_ENTER_ISP)
                     print("erasing application entry and entering official WCH ISP bootloader")
