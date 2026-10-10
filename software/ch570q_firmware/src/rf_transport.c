@@ -31,7 +31,7 @@ typedef struct __attribute__((packed))
     uint8_t cdc_ports;
     uint8_t rf_ready;
     uint8_t protocol;
-    uint8_t reserved;
+    uint8_t firmware_type;
     uint32_t system_clock;
     uint32_t app_start;
     uint32_t app_end;
@@ -85,6 +85,7 @@ static void remote_task(void)
         info->hardware = 0x72;
         info->rf_ready = 1;
         info->protocol = CFG_PROTOCOL_VERSION;
+        info->firmware_type = CFG_FIRMWARE_RF_UART;
         info->system_clock = GetSysClock();
         info->app_start = IAP_APP_START;
         info->app_end = IAP_APP_END;
@@ -319,6 +320,16 @@ uint8_t RfTransport_SetTxPower(uint8_t value)
 {
     gTxParam.txPowerVal = (int8_t)value;
     return RF_SaveTxPower(value);
+}
+
+uint8_t RfTransport_LoadXtalCap(uint8_t *value)
+{
+    return RF_LoadXtalCap(value);
+}
+
+uint8_t RfTransport_SaveXtalCap(uint8_t value)
+{
+    return RF_SaveXtalCap(value);
 }
 
 uint8_t RfTransport_GetRssi(int8_t *rssi)

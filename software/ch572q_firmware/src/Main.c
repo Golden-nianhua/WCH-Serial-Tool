@@ -84,9 +84,11 @@ int main(void)
 
     timebase_init();
     led_init();
+    DeviceConfig_Init();
+    HSECFG_Capacitance((HSECapTypeDef)
+                       ((DeviceConfig_GetXtalCap() - 6U) / 2U));
     UartBridge_Init();
     UsbDevice_Init();
-    DeviceConfig_Init();
     ConfigService_Init();
     app_mode = APP_USB_WAIT;
     usb_wait_start = millis();

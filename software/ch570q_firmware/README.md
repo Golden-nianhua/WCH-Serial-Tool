@@ -70,6 +70,8 @@ Commands:
 | Get RF configuration | `0x06` | none | four bytes; byte 0 is TX power |
 | Set RF configuration | `0x07` | four bytes | none |
 | Get RSSI | `0x0B` | none | signed RSSI byte in dBm |
+| Get HSE calibration | `0x0C` | none | capacitance, saved value, SOF samples, ticks/ms and error ppm |
+| Set HSE capacitance | `0x0D` | capacitance, save flag and two reserved bytes | none |
 | Software reset | `0x11` | none | none |
 | Remote get information | `0x21` | none | paired RF node information |
 | Remote get status | `0x22` | none | paired RF node status |
@@ -83,8 +85,23 @@ The receiver repeats one transaction until its response arrives, and the node
 deduplicates it by transaction ID. Remote reset is performed only after the
 receiver acknowledges the successful response.
 
-The TX-power setting is stored in its own reserved flash page at `0x3A000` and
-survives reset. Pairing metadata remains in the separate page at `0x3B000`.
+The TX-power and HSE-capacitance settings share the reserved flash page at
+`0x3A000` and survive reset. Pairing metadata remains in the separate page at
+`0x3B000`.
+
+## HSE calibration
+
+The 32 MHz crystal load can be selected from 6 pF through 20 pF in 2 pF steps.
+While USB is configured, the firmware measures 100 MHz SysTick counts against
+the host's 1 ms USB SOF reference. A temporary setting does not write flash;
+only an explicit save changes the value restored at the next boot.
+
+```powershell
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal-test
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal-calibrate
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal-calibrate --save
+```
 
 The TX-power byte uses the WCH RF encoding. Common values are `0x12` for
 0 dBm, `0x18` for +2 dBm, `0x1F` for +4 dBm and `0x2D` for +6 dBm. The power

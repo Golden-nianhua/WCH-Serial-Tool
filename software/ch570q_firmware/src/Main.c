@@ -17,6 +17,14 @@ typedef enum
 static app_mode_t app_mode;
 static uint32_t usb_wait_start;
 
+static void apply_saved_xtal_capacitance(void)
+{
+    uint8_t capacitance;
+
+    if(!RfTransport_LoadXtalCap(&capacitance))
+        HSECFG_Capacitance((HSECapTypeDef)((capacitance - 6U) / 2U));
+}
+
 static uint32_t millis(void)
 {
     return SYS_GetSysTickCnt() / (GetSysClock() / 1000U);
@@ -114,12 +122,14 @@ int main(void)
         {
             if(UsbDevice_IsConfigured())
             {
+                apply_saved_xtal_capacitance();
                 RfTransport_Init(RF_TRANSPORT_USB_RECEIVER, 1);
                 app_mode = APP_USB_RF_RECEIVER;
             }
             else if((uint32_t)(millis() - usb_wait_start) >= 500U)
             {
                 UsbDevice_Disable();
+                apply_saved_xtal_capacitance();
                 RfTransport_Init(RF_TRANSPORT_UART_NODE, 0);
                 app_mode = APP_RF_UART_NODE;
             }

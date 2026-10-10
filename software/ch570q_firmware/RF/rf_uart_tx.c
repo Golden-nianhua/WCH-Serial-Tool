@@ -68,7 +68,7 @@ typedef struct __attribute__((packed))
 {
     uint16_t head;
     uint8_t txPower;
-    uint8_t reserved;
+    uint8_t xtalCapacitance;
 } rfConfigInfo_t;
 
 static void rfProcessRx( rfPackage_t *pPkt );
@@ -600,20 +600,62 @@ uint8_t RF_LoadTxPower(uint8_t *value)
     return 0;
 }
 
-uint8_t RF_SaveTxPower(uint8_t value)
+static uint8_t xtal_cap_supported(uint8_t capacitance)
+{
+    return capacitance >= 6U && capacitance <= 20U &&
+           (capacitance & 1U) == 0U;
+}
+
+uint8_t RF_LoadXtalCap(uint8_t *value)
+{
+    rfConfigInfo_t *config = (rfConfigInfo_t *)RF_CONFIG_FLASH_ADDR;
+
+    if(config->head != RF_CONFIG_INFO_HEAD ||
+       !xtal_cap_supported(config->xtalCapacitance))
+        return 1;
+    *value = config->xtalCapacitance;
+    return 0;
+}
+
+static uint8_t save_config(uint8_t tx_power, uint8_t xtal_capacitance)
 {
     rfConfigInfo_t config __attribute__((aligned(4))) = {
-        RF_CONFIG_INFO_HEAD, value, 0
+        RF_CONFIG_INFO_HEAD, tx_power, xtal_capacitance
     };
     rfConfigInfo_t *saved = (rfConfigInfo_t *)RF_CONFIG_FLASH_ADDR;
     uint8_t result;
 
-    if(saved->head == RF_CONFIG_INFO_HEAD && saved->txPower == value)
+    if(saved->head == RF_CONFIG_INFO_HEAD &&
+       saved->txPower == tx_power &&
+       saved->xtalCapacitance == xtal_capacitance)
         return 0;
     result = (uint8_t)FLASH_ROM_ERASE(RF_CONFIG_FLASH_ADDR, 4096);
     if(!result)
         result = (uint8_t)FLASH_ROM_WRITE(RF_CONFIG_FLASH_ADDR, &config, 4);
     return result;
+}
+
+uint8_t RF_SaveTxPower(uint8_t value)
+{
+    rfConfigInfo_t *saved = (rfConfigInfo_t *)RF_CONFIG_FLASH_ADDR;
+    uint8_t capacitance = 18U;
+
+    if(saved->head == RF_CONFIG_INFO_HEAD &&
+       xtal_cap_supported(saved->xtalCapacitance))
+        capacitance = saved->xtalCapacitance;
+    return save_config(value, capacitance);
+}
+
+uint8_t RF_SaveXtalCap(uint8_t value)
+{
+    rfConfigInfo_t *saved = (rfConfigInfo_t *)RF_CONFIG_FLASH_ADDR;
+    uint8_t tx_power = LL_TX_PWR_0_DBM;
+
+    if(!xtal_cap_supported(value))
+        return 1;
+    if(saved->head == RF_CONFIG_INFO_HEAD)
+        tx_power = saved->txPower;
+    return save_config(tx_power, value);
 }
 
 uint8_t RF_RemoteTakeRequest(uint8_t *transaction, uint8_t *command,

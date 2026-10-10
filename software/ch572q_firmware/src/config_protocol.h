@@ -22,6 +22,8 @@
 #define CFG_CMD_GET_SCAN      0x09
 #define CFG_CMD_PAIR_DEVICE   0x0a
 #define CFG_CMD_GET_RSSI      0x0b
+#define CFG_CMD_GET_XTAL      0x0c
+#define CFG_CMD_SET_XTAL      0x0d
 #define CFG_CMD_RESET         0x11
 #define CFG_CMD_ENTER_ISP     0x12
 #define CFG_CMD_REMOTE_GET_INFO   0x21

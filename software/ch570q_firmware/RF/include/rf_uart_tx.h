@@ -40,6 +40,8 @@ uint8_t RF_ClearPairing(void);
 uint8_t RF_TxGetRssi(int8_t *rssi);
 uint8_t RF_LoadTxPower(uint8_t *value);
 uint8_t RF_SaveTxPower(uint8_t value);
+uint8_t RF_LoadXtalCap(uint8_t *value);
+uint8_t RF_SaveXtalCap(uint8_t value);
 uint8_t RF_RemoteTakeRequest(uint8_t *transaction, uint8_t *command,
                              uint8_t *payload, uint8_t *length);
 void RF_RemoteSetResponse(uint8_t transaction, uint8_t command,

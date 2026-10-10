@@ -55,6 +55,22 @@ typedef struct __attribute__((packed))
     uint8_t reserved[3];
 } radio_config_t;
 
+typedef struct __attribute__((packed))
+{
+    uint8_t capacitance;
+    uint8_t saved_capacitance;
+    uint16_t samples;
+    uint32_t average_ticks;
+    int32_t error_ppm;
+} xtal_status_t;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t capacitance;
+    uint8_t save;
+    uint8_t reserved[2];
+} xtal_set_t;
+
 static uint8_t reset_pending;
 static uint8_t isp_pending;
 static uint32_t reset_time;
@@ -89,7 +105,7 @@ void ConfigService_Init(void)
 static void make_info(config_packet_t *packet)
 {
     app_info_t info = {
-        0, 2, 0, 0x72, 1, 1, CFG_PROTOCOL_VERSION,
+        0, 2, 1, 0x72, 1, 1, CFG_PROTOCOL_VERSION,
         CFG_FIRMWARE_USB_BLE_UART,
         GetSysClock(), IAP_APP_START, IAP_APP_END,
         R8_CHIP_ID, (R8_GLOB_CFG_INFO & RB_CFG_BOOT_EN) != 0,
@@ -122,6 +138,24 @@ static void make_status(config_packet_t *packet)
     status.pair_state = BleUart_GetState();
     status.uart_baud = UartBridge_GetBaud();
     status.wireless_uart_baud = status.uart_baud;
+    Config_MakeResponse(packet, packet, CFG_STATUS_OK,
+                        &status, sizeof(status));
+}
+
+static void make_xtal_status(config_packet_t *packet)
+{
+    xtal_status_t status;
+    uint16_t samples;
+    uint32_t average_ticks;
+    int32_t error_ppm;
+
+    status.capacitance =
+        (uint8_t)(((R8_XT32M_TUNE & RB_XT32M_C_LOAD) >> 4) * 2U + 6U);
+    status.saved_capacitance = DeviceConfig_GetXtalCap();
+    UsbDevice_GetSofMeasurement(&samples, &average_ticks, &error_ppm);
+    status.samples = samples;
+    status.average_ticks = average_ticks;
+    status.error_ppm = error_ppm;
     Config_MakeResponse(packet, packet, CFG_STATUS_OK,
                         &status, sizeof(status));
 }
@@ -200,6 +234,36 @@ void ConfigService_ProcessPacket(const uint8_t *request, uint8_t *response)
                                                   : CFG_STATUS_STATE,
                             &rssi,
                             BleUart_IsConnected() ? sizeof(rssi) : 0);
+    }
+    else if(packet.command == CFG_CMD_GET_XTAL)
+    {
+        make_xtal_status(&packet);
+    }
+    else if(packet.command == CFG_CMD_SET_XTAL)
+    {
+        if(packet.length != sizeof(xtal_set_t))
+        {
+            Config_MakeResponse(&packet, &packet,
+                                CFG_STATUS_BAD_LENGTH, NULL, 0);
+        }
+        else
+        {
+            const xtal_set_t *setting = (const xtal_set_t *)packet.payload;
+            uint8_t status = CFG_STATUS_OK;
+
+            if(!DeviceConfig_XtalCapSupported(setting->capacitance))
+                status = CFG_STATUS_STATE;
+            else if(setting->save &&
+                    DeviceConfig_SetXtalCap(setting->capacitance))
+                status = CFG_STATUS_FLASH;
+            else
+            {
+                HSECFG_Capacitance((HSECapTypeDef)
+                                   ((setting->capacitance - 6U) / 2U));
+                UsbDevice_ResetSofMeasurement();
+            }
+            Config_MakeResponse(&packet, &packet, status, NULL, 0);
+        }
     }
     else if(packet.command == CFG_CMD_RESET)
     {

@@ -11,6 +11,7 @@
 #define USB_DESCRIPTOR_BOS     0x0f
 #define USB_MS_OS_VENDOR_CODE  0x20
 #define USB_MS_OS_DESCRIPTOR   0x0007
+#define USB_SOF_MAX_SAMPLES    2000U
 
 #define CDC_SET_LINE_CODING          0x20
 #define CDC_GET_LINE_CODING          0x21
@@ -113,9 +114,10 @@ static const uint8_t manufacturer_descriptor[] = {
     'U', 0, 'A', 0, 'R', 0, 'T', 0, ' ', 0, 'T', 0, 'o', 0, 'o', 0, 'l', 0
 };
 static const uint8_t product_descriptor[] = {
-    0x22, USB_DESCR_TYP_STRING,
-    'C', 0, 'H', 0, '5', 0, '7', 0, '2', 0, 'Q', 0, ' ', 0,
-    'U', 0, 'A', 0, 'R', 0, 'T', 0, ' ', 0, 'T', 0, 'o', 0, 'o', 0, 'l', 0
+    0x20, USB_DESCR_TYP_STRING,
+    'W', 0, 'C', 0, 'H', 0, ' ', 0,
+    'S', 0, 'e', 0, 'r', 0, 'i', 0, 'a', 0, 'l', 0, ' ', 0,
+    'T', 0, 'o', 0, 'o', 0, 'l', 0
 };
 static uint8_t serial_descriptor[38] = {
     38, USB_DESCR_TYP_STRING,
@@ -131,9 +133,10 @@ static const uint8_t uart1_descriptor[] = {
     '2', 0, '.', 0, '4', 0, 'G', 0, ' ', 0, 'U', 0, 'A', 0, 'R', 0, 'T', 0
 };
 static const uint8_t vendor_descriptor[] = {
-    0x1c, USB_DESCR_TYP_STRING,
-    'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0, ' ', 0,
-    'C', 0, 'o', 0, 'n', 0, 'f', 0, 'i', 0, 'g', 0
+    0x20, USB_DESCR_TYP_STRING,
+    'W', 0, 'C', 0, 'H', 0, ' ', 0,
+    'S', 0, 'e', 0, 'r', 0, 'i', 0, 'a', 0, 'l', 0, ' ', 0,
+    'T', 0, 'o', 0, 'o', 0, 'l', 0
 };
 
 __attribute__((aligned(4))) static uint8_t endpoint0_buffer[USB_PACKET_SIZE];
@@ -157,6 +160,12 @@ static uint8_t control_out_request;
 static uint8_t control_port;
 static uint8_t control_status_out;
 static uint32_t activity_count;
+static uint32_t sof_first_tick;
+static uint32_t sof_last_tick;
+static uint32_t sof_deadline_tick;
+static uint16_t sof_sample_count;
+static uint8_t sof_measurement_enabled;
+static uint8_t sof_measurement_pending;
 
 static uint32_t millis(void)
 {
@@ -177,19 +186,16 @@ static void build_serial_descriptor(void)
     }
 }
 
-__HIGH_CODE
 static uint8_t *out_buffer(uint8_t port)
 {
     return port == 0U ? endpoint1_buffer : endpoint2_buffer;
 }
 
-__HIGH_CODE
 static volatile uint8_t *endpoint_control(uint8_t port)
 {
     return port == 0U ? &R8_UEP1_CTRL : &R8_UEP2_CTRL;
 }
 
-__HIGH_CODE
 static void accept_out(uint8_t port)
 {
     volatile uint8_t *control = endpoint_control(port);
@@ -494,6 +500,13 @@ static void reset_endpoints(void)
     line_coding_pending[1] = 0;
     control_line_state[0] = 0;
     control_line_state[1] = 0;
+    sof_first_tick = 0;
+    sof_last_tick = 0;
+    sof_deadline_tick = 0;
+    sof_sample_count = 0;
+    sof_measurement_enabled = 0;
+    sof_measurement_pending = 0;
+    R8_USB_INT_EN = 0;
 }
 
 static void hardware_init(void)
@@ -540,6 +553,8 @@ void UsbDevice_Init(void)
 void UsbDevice_Disable(void)
 {
     R8_USB_INT_EN = 0;
+    sof_measurement_enabled = 0;
+    sof_measurement_pending = 0;
     PFIC_DisableIRQ(USB_IRQn);
     R8_USB_CTRL = 0;
     R8_UDEV_CTRL = 0;
@@ -555,6 +570,41 @@ uint8_t UsbDevice_IsConfigured(void)
 uint32_t UsbDevice_GetActivityCount(void)
 {
     return activity_count;
+}
+
+void UsbDevice_ResetSofMeasurement(void)
+{
+    sof_first_tick = 0;
+    sof_last_tick = 0;
+    sof_deadline_tick = 0;
+    sof_sample_count = 0;
+    sof_measurement_enabled = 0;
+    sof_measurement_pending = usb_configuration != 0;
+    R8_USB_INT_EN = 0;
+}
+
+void UsbDevice_GetSofMeasurement(uint16_t *samples,
+                                 uint32_t *average_ticks,
+                                 int32_t *error_ppm)
+{
+    uint32_t expected = GetSysClock() / 1000U;
+
+    *samples = sof_sample_count;
+    if(sof_sample_count)
+    {
+        uint32_t elapsed = sof_last_tick - sof_first_tick;
+        int64_t difference = (int64_t)elapsed -
+                             (int64_t)expected * sof_sample_count;
+
+        *average_ticks = elapsed / sof_sample_count;
+        *error_ppm = (int32_t)(difference * 1000000LL /
+                     ((int64_t)expected * sof_sample_count));
+    }
+    else
+    {
+        *average_ticks = 0;
+        *error_ppm = 0;
+    }
 }
 
 uint8_t UsbDevice_VendorRead(uint8_t *data, uint8_t capacity)
@@ -584,7 +634,6 @@ uint8_t UsbDevice_VendorWrite(const uint8_t *data, uint8_t length)
     return 1;
 }
 
-__HIGH_CODE
 uint8_t UsbDevice_RfRead(uint8_t *data, uint8_t capacity)
 {
     uint8_t length = usb_out[1].length;
@@ -615,7 +664,6 @@ uint8_t UsbDevice_RfWrite(const uint8_t *data, uint8_t length)
     return 1;
 }
 
-__HIGH_CODE
 uint8_t UsbDevice_RfLineCoding(uint32_t *baud, uint8_t *stop_bits,
                                uint8_t *parity, uint8_t *data_bits,
                                uint8_t *io_status)
@@ -724,6 +772,9 @@ static void process_interrupts(void)
 {
     uint8_t status;
 
+    if(sof_measurement_enabled)
+        return;
+
     if(R8_USB_INT_FG & RB_UIF_TRANSFER)
     {
         status = R8_USB_INT_ST;
@@ -782,6 +833,15 @@ static void process_interrupts(void)
                     R8_UEP7_CTRL = (R8_UEP7_CTRL & ~MASK_UEP_T_RES) |
                                    UEP_T_RES_NAK;
                     activity_count++;
+                    if(sof_measurement_pending)
+                    {
+                        sof_measurement_pending = 0;
+                        sof_measurement_enabled = 1;
+                        sof_deadline_tick = SYS_GetSysTickCnt() +
+                                            GetSysClock() * 3U;
+                        R8_USB_INT_EN = RB_UIE_DEV_SOF | RB_UIE_TRANSFER;
+                        PFIC_EnableIRQ(USB_IRQn);
+                    }
                     break;
             }
         }
@@ -798,9 +858,43 @@ static void process_interrupts(void)
         R8_USB_INT_FG = RB_UIF_SUSPEND;
 }
 
+__INTERRUPT
+__HIGH_CODE
+void USB_IRQHandler(void)
+{
+    if((R8_USB_INT_FG & RB_UIF_TRANSFER) &&
+       (R8_USB_INT_ST & MASK_UIS_TOKEN) == UIS_TOKEN_SOF)
+    {
+        uint32_t now = SysTick->CNTL;
+
+        if(sof_last_tick == 0U)
+            sof_first_tick = now;
+        else if(sof_sample_count < USB_SOF_MAX_SAMPLES)
+            sof_sample_count++;
+        sof_last_tick = now;
+
+        if(sof_sample_count == USB_SOF_MAX_SAMPLES)
+        {
+            R8_USB_INT_EN = 0;
+            PFIC_DisableIRQ(USB_IRQn);
+            sof_measurement_enabled = 0;
+        }
+    }
+
+    R8_USB_INT_FG = RB_UIF_TRANSFER;
+}
+
 void UsbDevice_Task(void)
 {
     uint8_t discard;
+
+    if(sof_measurement_enabled &&
+       (int32_t)(SYS_GetSysTickCnt() - sof_deadline_tick) >= 0)
+    {
+        R8_USB_INT_EN = 0;
+        PFIC_DisableIRQ(USB_IRQn);
+        sof_measurement_enabled = 0;
+    }
 
     process_interrupts();
 

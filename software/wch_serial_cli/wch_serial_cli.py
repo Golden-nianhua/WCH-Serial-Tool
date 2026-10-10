@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import asyncio
 import ctypes
 from ctypes import wintypes
 import struct
@@ -8,10 +9,17 @@ import time
 import zlib
 
 INTERFACE_GUID = "{A1D4935B-4D76-4E6F-B623-6C856A67A8E9}"
+USB_DEVICE_INTERFACE_GUID = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}"
 VID = 0x1A86
 APP_PID = 0x572D
+BLE_APP_PID = 0x572E
 APP_EP_OUT = 0x07
 APP_EP_IN = 0x87
+
+BLE_UART_SERVICE = "0000fff0-0000-1000-8000-00805f9b34fb"
+BLE_CONFIG_SERVICE = "0000ffe0-0000-1000-8000-00805f9b34fb"
+BLE_CONFIG_TX = "0000ffe1-0000-1000-8000-00805f9b34fb"
+BLE_CONFIG_RX = "0000ffe2-0000-1000-8000-00805f9b34fb"
 
 FILE_ATTRIBUTE_NORMAL = 0x00000080
 FILE_FLAG_OVERLAPPED = 0x40000000
@@ -32,6 +40,8 @@ CMD_START_SCAN = 0x08
 CMD_GET_SCAN = 0x09
 CMD_PAIR_DEVICE = 0x0A
 CMD_GET_RSSI = 0x0B
+CMD_GET_XTAL = 0x0C
+CMD_SET_XTAL = 0x0D
 CMD_RESET = 0x11
 CMD_ENTER_ISP = 0x12
 CMD_REMOTE_GET_INFO = 0x21
@@ -121,10 +131,10 @@ def win_error(message):
     raise OSError(ctypes.get_last_error(), message)
 
 
-def enumerate_paths():
+def enumerate_paths(interface_guid=INTERFACE_GUID):
     if sys.platform != "win32":
         raise RuntimeError("This tool currently requires Windows")
-    guid = parse_guid(INTERFACE_GUID)
+    guid = parse_guid(interface_guid)
     handle = setupapi.SetupDiGetClassDevsW(ctypes.byref(guid), None, None, 0x12)
     if handle == ctypes.c_void_p(-1).value:
         win_error("SetupDiGetClassDevsW")
@@ -195,14 +205,106 @@ class Device:
     def __exit__(self, *_): self.close()
 
 
-def find_paths(pid=None):
-    expected = None if pid is None else f"pid_{pid:04x}"
-    paths = [p for p in enumerate_paths() if f"vid_{VID:04x}" in p.lower()]
-    if expected:
-        paths = [p for p in paths if expected in p.lower()]
+async def _discover_ble(timeout=4.0):
+    from bleak import BleakScanner
+
+    found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    devices = []
+    for device, advertisement in found.values():
+        uuids = {uuid.lower() for uuid in advertisement.service_uuids}
+        name = advertisement.local_name or device.name or ""
+        if ((BLE_CONFIG_SERVICE in uuids and BLE_UART_SERVICE in uuids) or
+                name in ("WCH BLE UART", "CH9143BLE2U")):
+            devices.append((device.address, name, advertisement.rssi))
+    devices.sort(key=lambda item: item[0])
+    return devices
+
+
+def discover_ble(timeout=4.0):
+    return asyncio.run(_discover_ble(timeout))
+
+
+class BleDevice:
+    def __init__(self, address):
+        from bleak import BleakClient
+
+        self.address = address
+        self.loop = asyncio.new_event_loop()
+        self.client = BleakClient(address)
+        self.response = bytearray(PACKET_SIZE)
+        self.response_length = 0
+        self.response_event = None
+        self.loop.run_until_complete(self._connect())
+
+    async def _connect(self):
+        await self.client.connect()
+        await self.client.start_notify(BLE_CONFIG_TX, self._notification)
+
+    def _notification(self, _, data):
+        if len(data) < 2:
+            return
+        offset = data[0]
+        payload = data[1:]
+        if offset == 0:
+            self.response_length = 0
+        if offset != self.response_length or offset + len(payload) > PACKET_SIZE:
+            self.response_length = 0
+            return
+        self.response[offset:offset + len(payload)] = payload
+        self.response_length += len(payload)
+        if self.response_length == PACKET_SIZE and self.response_event:
+            self.response_event.set()
+
+    async def _transfer(self, packet):
+        self.response_length = 0
+        self.response_event = asyncio.Event()
+        for offset in range(0, PACKET_SIZE, 19):
+            fragment = bytes([offset]) + packet[offset:offset + 19]
+            await self.client.write_gatt_char(BLE_CONFIG_RX, fragment,
+                                              response=True)
+        await asyncio.wait_for(self.response_event.wait(), timeout=5.0)
+        return bytes(self.response)
+
+    def transfer(self, packet):
+        return self.loop.run_until_complete(self._transfer(packet))
+
+    def close(self):
+        try:
+            if self.client.is_connected:
+                self.loop.run_until_complete(self.client.disconnect())
+        finally:
+            self.loop.close()
+
+    def __enter__(self): return self
+    def __exit__(self, *_): self.close()
+
+
+def find_paths(pids=None):
+    def matches(path):
+        lower = path.lower()
+        return (f"vid_{VID:04x}" in lower and
+                (not pids or any(f"pid_{pid:04x}" in lower for pid in pids)))
+
+    paths = [path for path in enumerate_paths() if matches(path)]
+    known_devices = {path.rsplit("#{", 1)[0].lower() for path in paths}
+
+    # Zadig generates a per-install interface GUID. Its WinUSB device is also
+    # exposed through the standard USB device interface, so probe that path as
+    # a fallback without depending on Zadig's random GUID.
+    for path in enumerate_paths(USB_DEVICE_INTERFACE_GUID):
+        device_key = path.rsplit("#{", 1)[0].lower()
+        if not matches(path) or device_key in known_devices:
+            continue
+        try:
+            with Device(path):
+                pass
+        except OSError:
+            continue
+        paths.append(path)
+        known_devices.add(device_key)
+
     if not paths:
-        kind = "device" if pid is None else f"PID {pid:04X} device"
-        raise RuntimeError(f"CH572Q {kind} not found")
+        raise RuntimeError("WCH Serial Tool USB device not found")
     return paths
 
 
@@ -286,13 +388,13 @@ def show_status(device, remote=False):
         "<6BHII", data
     )
     print(f"USB configured: {'yes' if configured else 'no'}")
-    print(f"RF available: {'yes' if rf_ready else 'no'}")
-    print(f"RF role: {RF_ROLE_NAMES.get(role, role)}")
-    print(f"paired: {'yes' if paired else 'no'}")
-    print(f"pair state: {state}")
+    print(f"wireless available: {'yes' if rf_ready else 'no'}")
+    print(f"wireless role: {RF_ROLE_NAMES.get(role, role)}")
+    print(f"connected: {'yes' if paired else 'no'}")
+    print(f"wireless state: {state}")
     print(f"server data: 0x{server:04X}")
     print(f"physical UART baud: {uart_baud}")
-    print(f"RF UART baud: {rf_baud}")
+    print(f"{'BLE' if role == 3 else 'RF'} UART baud: {rf_baud}")
 
 
 def show_pair_status(device):
@@ -312,6 +414,70 @@ def show_rssi(device, remote=False):
     rssi, = struct.unpack("<b", target_command(device, CMD_GET_RSSI, remote))
     direction = "receiver to node" if remote else "node to receiver"
     print(f"{direction} RSSI: {rssi} dBm")
+
+
+def get_xtal_status(device):
+    data = command(device, CMD_GET_XTAL)
+    return struct.unpack_from("<BBHIi", data)
+
+
+def show_xtal_status(device):
+    result = get_xtal_status(device)
+    if result[2] == 0:
+        set_xtal(device, result[0])
+        result = wait_xtal_measurement(device)
+    capacitance, saved, samples, average, ppm = result
+    print(f"HSE load capacitance: {capacitance} pF")
+    print(f"saved capacitance: {saved} pF")
+    print(f"SOF samples: {samples}")
+    if samples:
+        print(f"average ticks/ms: {average}")
+        print(f"frequency error: {ppm:+d} ppm")
+
+
+def set_xtal(device, capacitance, save=False):
+    if capacitance not in range(6, 21, 2):
+        raise ValueError("capacitance must be 6, 8, 10, 12, 14, 16, 18, or 20 pF")
+    command(device, CMD_SET_XTAL,
+            struct.pack("<4B", capacitance, int(save), 0, 0))
+
+
+def wait_xtal_measurement(device, minimum_samples=2000, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    time.sleep((minimum_samples + 100) / 1000.0)
+    while True:
+        result = get_xtal_status(device)
+        if result[2] >= minimum_samples:
+            return result
+        if time.monotonic() >= deadline:
+            raise RuntimeError("USB SOF measurement timeout")
+        time.sleep(0.05)
+
+
+def test_xtal_capacitances(device, apply_best=False, save=False):
+    original = get_xtal_status(device)[0]
+    results = []
+
+    try:
+        for capacitance in range(6, 21, 2):
+            set_xtal(device, capacitance)
+            _, _, samples, average, ppm = wait_xtal_measurement(device)
+            results.append((abs(ppm), capacitance, ppm, samples, average))
+            print(f"{capacitance:2d} pF: {ppm:+7d} ppm  "
+                  f"{average} ticks/ms  {samples} samples")
+    except Exception:
+        set_xtal(device, original)
+        raise
+
+    best = min(results)
+    if apply_best:
+        set_xtal(device, best[1], save)
+        print(f"selected: {best[1]} pF ({best[2]:+d} ppm)" +
+              (" and saved" if save else ""))
+    else:
+        set_xtal(device, original)
+        print(f"best: {best[1]} pF ({best[2]:+d} ppm); "
+              f"restored {original} pF")
 
 
 def get_scan_results(device):
@@ -344,8 +510,10 @@ def main():
     parser = argparse.ArgumentParser(description="WCH Serial Tool configuration")
     parser.add_argument("--device", type=int,
                         help="select one device by list index; default is all devices")
+    parser.add_argument("--ble", metavar="ADDRESS_OR_INDEX",
+                        help="use a BLE configuration device instead of USB")
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("list", "pair-status", "pair", "clear-pair",
+    for name in ("list", "ble-list", "pair-status", "pair", "clear-pair",
                  "scan-results", "isp"):
         sub.add_parser(name)
     for name in ("info", "status", "rf-config", "rssi", "reset"):
@@ -363,26 +531,63 @@ def main():
                        help="WCH TX power code, for example 0x12 or 0x2D")
     power.add_argument("--remote", action="store_true",
                        help="set power on the paired RF node")
+    sub.add_parser("xtal", help="show HSE load capacitance and USB SOF measurement")
+    xtal_set = sub.add_parser("xtal-set", help="set the HSE load capacitance")
+    xtal_set.add_argument("capacitance", type=int,
+                          choices=range(6, 21, 2), metavar="PF")
+    xtal_set.add_argument("--save", action="store_true",
+                          help="save the setting to flash")
+    sub.add_parser("xtal-test", help="measure all capacitance settings")
+    xtal_calibrate = sub.add_parser(
+        "xtal-calibrate", help="select the setting with the smallest SOF error"
+    )
+    xtal_calibrate.add_argument("--save", action="store_true",
+                                help="save the selected setting to flash")
     args = parser.parse_args()
 
+    if args.ble is not None and args.device is not None:
+        parser.error("--ble and --device cannot be used together")
+
     if args.action == "list":
-        paths = enumerate_paths()
+        try:
+            paths = find_paths((APP_PID, BLE_APP_PID))
+        except RuntimeError:
+            paths = []
         if not paths: print("no devices")
         for index, path in enumerate(paths): print(f"[{index}] {path}")
+    elif args.action == "ble-list":
+        devices = discover_ble()
+        if not devices: print("no BLE UART devices")
+        for index, (address, name, rssi) in enumerate(devices):
+            print(f"[{index}] {address}  {name}  RSSI {rssi} dBm")
     else:
-        paths = find_paths()
-        if args.device is not None:
-            if args.device >= len(paths):
-                raise RuntimeError(
-                    f"device index {args.device} not found; {len(paths)} device(s) available"
-                )
-            selected = [(args.device, paths[args.device])]
+        if args.ble is not None:
+            if args.ble.isdecimal():
+                devices = discover_ble()
+                index = int(args.ble)
+                if index >= len(devices):
+                    raise RuntimeError(
+                        f"BLE device index {index} not found; {len(devices)} device(s) available"
+                    )
+                selected = [(index, devices[index][0])]
+            else:
+                selected = [(0, args.ble)]
+            device_class = BleDevice
         else:
-            selected = list(enumerate(paths))
+            paths = find_paths((APP_PID, BLE_APP_PID))
+            if args.device is not None:
+                if args.device >= len(paths):
+                    raise RuntimeError(
+                        f"device index {args.device} not found; {len(paths)} device(s) available"
+                    )
+                selected = [(args.device, paths[args.device])]
+            else:
+                selected = list(enumerate(paths))
+            device_class = Device
 
         for position, (index, path) in enumerate(selected):
             print(f"[{index}] {path}")
-            with Device(path) as device:
+            with device_class(path) as device:
                 if args.action == "info": show_info(device, args.remote)
                 elif args.action == "status": show_status(device, args.remote)
                 elif args.action == "pair-status": show_pair_status(device)
@@ -390,6 +595,15 @@ def main():
                 elif args.action == "clear-pair": command(device, CMD_CLEAR_PAIR); print("pairing cleared")
                 elif args.action == "rf-config": show_rf_config(device, args.remote)
                 elif args.action == "rssi": show_rssi(device, args.remote)
+                elif args.action == "xtal": show_xtal_status(device)
+                elif args.action == "xtal-set":
+                    set_xtal(device, args.capacitance, args.save)
+                    print(f"HSE load capacitance set to {args.capacitance} pF" +
+                          (" and saved" if args.save else ""))
+                elif args.action == "xtal-test":
+                    test_xtal_capacitances(device)
+                elif args.action == "xtal-calibrate":
+                    test_xtal_capacitances(device, True, args.save)
                 elif args.action == "scan-results": show_scan_results(device)
                 elif args.action == "scan":
                     command(device, CMD_START_SCAN)

@@ -7,8 +7,9 @@ dependencies. Do not manually create or activate a virtual environment;
 The application interface is matched using:
 
 ```text
-VID:  0x1A86
-PID:  0x572D
+VID:      0x1A86
+RF PID:   0x572D
+BLE PID:  0x572E
 GUID: {A1D4935B-4D76-4E6F-B623-6C856A67A8E9}
 ```
 
@@ -35,6 +36,10 @@ uv run wch_serial_cli.py scan-results
 uv run wch_serial_cli.py connect 0
 uv run wch_serial_cli.py reset
 uv run wch_serial_cli.py isp
+uv run wch_serial_cli.py xtal
+uv run wch_serial_cli.py xtal-test
+uv run wch_serial_cli.py xtal-calibrate
+uv run wch_serial_cli.py xtal-calibrate --save
 ```
 
 Commands operate on all connected receivers by default. List them and select
@@ -59,6 +64,13 @@ The configured TX power is saved in flash on both the receiver and RF node.
 The `rssi` command reports node-to-receiver signal strength. Use
 `rssi --remote` for receiver-to-node signal strength. RSSI is available only
 while the RF link is connected.
+
+`xtal-test` measures all eight HSE load-capacitance settings against USB SOF,
+prints their frequency errors, and restores the original setting.
+`xtal-calibrate` leaves the best setting active for the current session;
+add `--save` to store it in flash for future boots. The USB host clock is the
+reference, so this is board-level adjustment rather than laboratory-grade
+frequency calibration.
 
 The `isp` command disconnects USB, erases the 4 KB block containing the
 application entry at address zero, and resets the CH572. The factory bootloader

@@ -64,6 +64,20 @@ The USB CDC line-coding policy matches the CH570 physical UART implementation:
 
 The system clock remains fixed at 100 MHz in both USB and BLE modes.
 
+## HSE calibration
+
+In USB mode, the firmware can test the eight internal 32 MHz crystal load
+settings from 6 pF through 20 pF. It compares 100 MHz SysTick counts with the
+host's 1 ms USB SOF reference. Temporary settings do not write flash, and the
+saved setting is restored before USB or BLE starts on the next boot.
+
+```powershell
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal-test
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal-calibrate
+uv run ..\wch_serial_cli\wch_serial_cli.py xtal-calibrate --save
+```
+
 ## Memory layout
 
 - `0x00000000-0x00001FFF`: 8 KiB boot reservation

@@ -7,5 +7,8 @@ void DeviceConfig_Init(void);
 uint8_t DeviceConfig_GetTxPower(void);
 uint8_t DeviceConfig_PowerSupported(uint8_t power);
 uint8_t DeviceConfig_SetTxPower(uint8_t power);
+uint8_t DeviceConfig_GetXtalCap(void);
+uint8_t DeviceConfig_XtalCapSupported(uint8_t capacitance);
+uint8_t DeviceConfig_SetXtalCap(uint8_t capacitance);
 
 #endif

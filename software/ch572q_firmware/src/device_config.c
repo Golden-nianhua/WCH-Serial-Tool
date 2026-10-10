@@ -13,11 +13,18 @@ typedef struct
 {
     uint32_t magic;
     uint8_t tx_power;
-    uint8_t reserved[3];
+    uint8_t xtal_capacitance;
+    uint8_t reserved[2];
     uint32_t crc32;
 } device_config_t;
 
 static device_config_t settings;
+
+uint8_t DeviceConfig_XtalCapSupported(uint8_t capacitance)
+{
+    return capacitance >= 6U && capacitance <= 20U &&
+           (capacitance & 1U) == 0U;
+}
 
 uint8_t DeviceConfig_PowerSupported(uint8_t power)
 {
@@ -56,14 +63,16 @@ void DeviceConfig_Init(void)
        DeviceConfig_PowerSupported(saved->tx_power))
     {
         settings = *saved;
+        if(!DeviceConfig_XtalCapSupported(settings.xtal_capacitance))
+            settings.xtal_capacitance = 18U;
     }
     else
     {
         settings.magic = DEVICE_CONFIG_MAGIC;
         settings.tx_power = LL_TX_PWR_0_DBM;
+        settings.xtal_capacitance = 18U;
         settings.reserved[0] = 0;
         settings.reserved[1] = 0;
-        settings.reserved[2] = 0;
         settings.crc32 = 0;
     }
 }
@@ -71,6 +80,11 @@ void DeviceConfig_Init(void)
 uint8_t DeviceConfig_GetTxPower(void)
 {
     return settings.tx_power;
+}
+
+uint8_t DeviceConfig_GetXtalCap(void)
+{
+    return settings.xtal_capacitance;
 }
 
 static uint8_t save(void)
@@ -93,6 +107,23 @@ uint8_t DeviceConfig_SetTxPower(uint8_t power)
     if(save())
     {
         settings.tx_power = previous;
+        return 1;
+    }
+    return 0;
+}
+
+uint8_t DeviceConfig_SetXtalCap(uint8_t capacitance)
+{
+    uint8_t previous = settings.xtal_capacitance;
+
+    if(!DeviceConfig_XtalCapSupported(capacitance))
+        return 1;
+    if(previous == capacitance)
+        return 0;
+    settings.xtal_capacitance = capacitance;
+    if(save())
+    {
+        settings.xtal_capacitance = previous;
         return 1;
     }
     return 0;

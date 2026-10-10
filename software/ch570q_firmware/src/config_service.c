@@ -17,7 +17,7 @@ typedef struct __attribute__((packed))
     uint8_t cdc_ports;
     uint8_t rf_ready;
     uint8_t protocol;
-    uint8_t reserved;
+    uint8_t firmware_type;
     uint32_t system_clock;
     uint32_t app_start;
     uint32_t app_end;
@@ -52,6 +52,22 @@ typedef struct __attribute__((packed))
     uint8_t tx_power;
     uint8_t reserved[3];
 } rf_config_t;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t capacitance;
+    uint8_t saved_capacitance;
+    uint16_t samples;
+    uint32_t average_ticks;
+    int32_t error_ppm;
+} xtal_status_t;
+
+typedef struct __attribute__((packed))
+{
+    uint8_t capacitance;
+    uint8_t save;
+    uint8_t reserved[2];
+} xtal_set_t;
 
 typedef struct __attribute__((packed))
 {
@@ -92,6 +108,31 @@ void ConfigService_Init(void)
     isp_pending = 0;
 }
 
+static uint8_t xtal_cap_supported(uint8_t capacitance)
+{
+    return capacitance >= 6U && capacitance <= 20U &&
+           (capacitance & 1U) == 0U;
+}
+
+static void make_xtal_status(config_packet_t *packet)
+{
+    xtal_status_t status;
+    uint16_t samples;
+    uint32_t average_ticks;
+    int32_t error_ppm;
+
+    status.capacitance =
+        (uint8_t)(((R8_XT32M_TUNE & RB_XT32M_C_LOAD) >> 4) * 2U + 6U);
+    status.saved_capacitance = 18U;
+    (void)RfTransport_LoadXtalCap(&status.saved_capacitance);
+    UsbDevice_GetSofMeasurement(&samples, &average_ticks, &error_ppm);
+    status.samples = samples;
+    status.average_ticks = average_ticks;
+    status.error_ppm = error_ppm;
+    Config_MakeResponse(packet, packet, CFG_STATUS_OK,
+                        &status, sizeof(status));
+}
+
 void ConfigService_Task(void)
 {
     config_packet_t packet;
@@ -116,7 +157,8 @@ void ConfigService_Task(void)
     else if(packet.command == CFG_CMD_GET_INFO)
     {
         app_info_t info = {
-            0, 4, 7, 0x72, 2, 1, CFG_PROTOCOL_VERSION, 0,
+            0, 4, 8, 0x72, 2, 1, CFG_PROTOCOL_VERSION,
+            CFG_FIRMWARE_RF_UART,
             GetSysClock(), IAP_APP_START, IAP_APP_END,
             R8_CHIP_ID, (R8_GLOB_CFG_INFO & RB_CFG_BOOT_EN) != 0,
             {0}, {0}
@@ -233,6 +275,36 @@ void ConfigService_Task(void)
         Config_MakeResponse(&packet, &packet,
                             result ? CFG_STATUS_STATE : CFG_STATUS_OK,
                             &rssi, result ? 0 : sizeof(rssi));
+    }
+    else if(packet.command == CFG_CMD_GET_XTAL)
+    {
+        make_xtal_status(&packet);
+    }
+    else if(packet.command == CFG_CMD_SET_XTAL)
+    {
+        if(packet.length != sizeof(xtal_set_t))
+        {
+            Config_MakeResponse(&packet, &packet,
+                                CFG_STATUS_BAD_LENGTH, 0, 0);
+        }
+        else
+        {
+            const xtal_set_t *setting = (const xtal_set_t *)packet.payload;
+            uint8_t status = CFG_STATUS_OK;
+
+            if(!xtal_cap_supported(setting->capacitance))
+                status = CFG_STATUS_STATE;
+            else if(setting->save &&
+                    RfTransport_SaveXtalCap(setting->capacitance))
+                status = CFG_STATUS_FLASH;
+            else
+            {
+                HSECFG_Capacitance((HSECapTypeDef)
+                                   ((setting->capacitance - 6U) / 2U));
+                UsbDevice_ResetSofMeasurement();
+            }
+            Config_MakeResponse(&packet, &packet, status, 0, 0);
+        }
     }
     else if(packet.command == CFG_CMD_RESET)
     {
