@@ -1,29 +1,65 @@
 #include "CH57x_common.h"
 
+#include "uart_bridge.h"
 #include "usb_device.h"
 
 #include <string.h>
 
 #define USB_PACKET_SIZE       64U
-#define USB_DESCRIPTOR_BOS    0x0f
-#define USB_MS_OS_VENDOR_CODE 0x20
-#define USB_MS_OS_DESCRIPTOR  0x0007
+#define UART_USB_FLUSH_MS      1U
+#define USB_CDC_PORTS          1U
+#define USB_DESCRIPTOR_BOS     0x0f
+#define USB_MS_OS_VENDOR_CODE  0x20
+#define USB_MS_OS_DESCRIPTOR   0x0007
+
+#define CDC_SET_LINE_CODING          0x20
+#define CDC_GET_LINE_CODING          0x21
+#define CDC_SET_CONTROL_LINE_STATE   0x22
+#define CDC_SEND_BREAK               0x23
+
+#define CDC0_CONTROL_INTERFACE 0
+
+typedef struct __attribute__((packed))
+{
+    uint32_t baud_rate;
+    uint8_t stop_bits;
+    uint8_t parity;
+    uint8_t data_bits;
+} cdc_line_coding_t;
+
+typedef struct
+{
+    volatile uint8_t length;
+    volatile uint8_t index;
+} usb_out_transfer_t;
 
 static const uint8_t device_descriptor[] = {
     0x12, USB_DESCR_TYP_DEVICE,
     0x10, 0x02,
-    0x00, 0x00, 0x00,
+    0xef, 0x02, 0x01,
     USB_PACKET_SIZE,
     0x86, 0x1a,
     0x2e, 0x57,
-    0x06, 0x01,
+    0x07, 0x01,
     0x01, 0x02, 0x03,
     0x01
 };
 
+/* CDC uses EP1 and WinUSB configuration uses EP7. */
 static const uint8_t configuration_descriptor[] = {
-    0x09, USB_DESCR_TYP_CONFIG, 0x20, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32,
-    0x09, USB_DESCR_TYP_INTERF, 0x00, 0x00, 0x02, 0xff, 0x00, 0x00, 0x04,
+    0x09, USB_DESCR_TYP_CONFIG, 0x5b, 0x00, 0x03, 0x01, 0x00, 0x80, 0x32,
+
+    0x08, 0x0b, 0x00, 0x02, 0x02, 0x02, 0x01, 0x04,
+    0x09, USB_DESCR_TYP_INTERF, 0x00, 0x00, 0x00, 0x02, 0x02, 0x01, 0x04,
+    0x05, 0x24, 0x00, 0x10, 0x01,
+    0x05, 0x24, 0x01, 0x00, 0x01,
+    0x04, 0x24, 0x02, 0x02,
+    0x05, 0x24, 0x06, 0x00, 0x01,
+    0x09, USB_DESCR_TYP_INTERF, 0x01, 0x00, 0x02, 0x0a, 0x00, 0x00, 0x04,
+    0x07, USB_DESCR_TYP_ENDP, 0x01, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
+    0x07, USB_DESCR_TYP_ENDP, 0x81, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
+
+    0x09, USB_DESCR_TYP_INTERF, 0x02, 0x00, 0x02, 0xff, 0x00, 0x00, 0x05,
     0x07, USB_DESCR_TYP_ENDP, 0x07, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
     0x07, USB_DESCR_TYP_ENDP, 0x87, 0x02, USB_PACKET_SIZE, 0x00, 0x00
 };
@@ -34,12 +70,14 @@ static const uint8_t bos_descriptor[] = {
     0xdf, 0x60, 0xdd, 0xd8, 0x89, 0x45, 0xc7, 0x4c,
     0x9c, 0xd2, 0x65, 0x9d, 0x9e, 0x64, 0x8a, 0x9f,
     0x00, 0x00, 0x03, 0x06,
-    0xa2, 0x00,
+    0xb2, 0x00,
     USB_MS_OS_VENDOR_CODE, 0x00
 };
 
 static const uint8_t ms_os_20_descriptor[] = {
-    0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x06, 0xa2, 0x00,
+    0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x06, 0xb2, 0x00,
+    0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa8, 0x00,
+    0x08, 0x00, 0x02, 0x00, 0x02, 0x00, 0xa0, 0x00,
     0x14, 0x00, 0x03, 0x00,
     'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -73,6 +111,11 @@ static uint8_t serial_descriptor[38] = {
     38, USB_DESCR_TYP_STRING,
     'C', 0, 'H', 0, '5', 0, '7', 0, '2', 0, 'Q', 0
 };
+static const uint8_t uart0_descriptor[] = {
+    0x1c, USB_DESCR_TYP_STRING,
+    'P', 0, 'h', 0, 'y', 0, 's', 0, 'i', 0, 'c', 0, 'a', 0, 'l', 0,
+    ' ', 0, 'U', 0, 'A', 0, 'R', 0, 'T', 0
+};
 static const uint8_t vendor_descriptor[] = {
     0x20, USB_DESCR_TYP_STRING,
     'W', 0, 'C', 0, 'H', 0, ' ', 0,
@@ -81,16 +124,30 @@ static const uint8_t vendor_descriptor[] = {
 };
 
 __attribute__((aligned(4))) static uint8_t endpoint0_buffer[USB_PACKET_SIZE];
+__attribute__((aligned(4))) static uint8_t endpoint1_buffer[USB_PACKET_SIZE * 2U];
 __attribute__((aligned(4))) static uint8_t endpoint7_buffer[USB_PACKET_SIZE * 2U];
 
+static uint32_t uart_rx_time;
+static uint32_t uart_rx_event;
+static uint8_t uart_zlp_pending;
+static usb_out_transfer_t usb_out[USB_CDC_PORTS];
+static cdc_line_coding_t line_coding[USB_CDC_PORTS];
+static volatile uint8_t line_coding_pending[USB_CDC_PORTS];
+static uint16_t control_line_state[USB_CDC_PORTS];
 static volatile uint8_t usb_configuration;
 static volatile uint8_t pending_address;
 static volatile uint8_t vendor_out_length;
 static const uint8_t *control_data;
 static uint16_t control_remaining;
+static uint8_t control_out_request;
+static uint8_t control_port;
 static uint8_t control_status_out;
 static uint32_t activity_count;
 
+static uint32_t millis(void)
+{
+    return SYS_GetSysTickCnt() / (GetSysClock() / 1000U);
+}
 static void build_serial_descriptor(void)
 {
     static const uint8_t hex[] = "0123456789ABCDEF";
@@ -103,6 +160,12 @@ static void build_serial_descriptor(void)
         serial_descriptor[14U + index * 4U] = hex[mac[index] >> 4];
         serial_descriptor[16U + index * 4U] = hex[mac[index] & 0x0fU];
     }
+}
+
+__HIGH_CODE
+static void accept_out(void)
+{
+    R8_UEP1_CTRL = (R8_UEP1_CTRL & ~MASK_UEP_R_RES) | UEP_R_RES_ACK;
 }
 
 static void load_control_packet(void)
@@ -135,10 +198,82 @@ static void control_status(void)
                    UEP_R_RES_NAK | UEP_T_RES_ACK;
 }
 
+static void control_out(void)
+{
+    R8_UEP0_T_LEN = 0;
+    R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG |
+                   UEP_R_RES_ACK | UEP_T_RES_NAK;
+}
+
 static void control_stall(void)
 {
     R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG |
                    UEP_R_RES_STALL | UEP_T_RES_STALL;
+}
+
+static uint8_t port_from_interface(uint16_t interface)
+{
+    return interface == CDC0_CONTROL_INTERFACE ? 0U : 0xffU;
+}
+
+static uint8_t baud_supported(uint8_t port, uint32_t baud)
+{
+    uint32_t actual;
+    uint32_t error;
+
+    (void)port;
+    if(baud == 0U)
+        return 0;
+    if(baud <= 1000000U)
+        return 1;
+    if(baud > 12000000U)
+        return 0;
+    if(baud == 12000000U || baud == 6000000U)
+        return 1;
+
+    actual = UartBridge_CalculateBaud(baud);
+    error = actual > baud ? actual - baud : baud - actual;
+    return error * 100U <= baud * 2U;
+}
+
+static void handle_class_request(PUSB_SETUP_REQ setup)
+{
+    uint8_t port = port_from_interface(setup->wIndex);
+
+    if(port >= USB_CDC_PORTS)
+    {
+        control_stall();
+        return;
+    }
+
+    switch(setup->bRequest)
+    {
+        case CDC_SET_LINE_CODING:
+            control_out_request = CDC_SET_LINE_CODING;
+            control_port = port;
+            control_out();
+            break;
+
+        case CDC_GET_LINE_CODING:
+            control_in((const uint8_t *)&line_coding[port],
+                       sizeof(cdc_line_coding_t), setup->wLength);
+            break;
+
+        case CDC_SET_CONTROL_LINE_STATE:
+            control_line_state[port] = setup->wValue;
+            control_status();
+            break;
+
+        case CDC_SEND_BREAK:
+            if(port == 0U)
+                UartBridge_SetBreak(setup->wValue != 0U);
+            control_status();
+            break;
+
+        default:
+            control_stall();
+            break;
+    }
 }
 
 static void handle_vendor_request(PUSB_SETUP_REQ setup)
@@ -186,7 +321,8 @@ static void handle_standard_request(PUSB_SETUP_REQ setup)
                         case 1: descriptor = manufacturer_descriptor; descriptor_length = sizeof(manufacturer_descriptor); break;
                         case 2: descriptor = product_descriptor; descriptor_length = sizeof(product_descriptor); break;
                         case 3: descriptor = serial_descriptor; descriptor_length = sizeof(serial_descriptor); break;
-                        case 4: descriptor = vendor_descriptor; descriptor_length = sizeof(vendor_descriptor); break;
+                        case 4: descriptor = uart0_descriptor; descriptor_length = sizeof(uart0_descriptor); break;
+                        case 5: descriptor = vendor_descriptor; descriptor_length = sizeof(vendor_descriptor); break;
                     }
                     break;
             }
@@ -234,12 +370,16 @@ static void handle_setup(void)
     PUSB_SETUP_REQ setup = (PUSB_SETUP_REQ)endpoint0_buffer;
 
     pending_address = 0;
+    control_out_request = 0;
     control_status_out = 0;
 
     switch(setup->bRequestType & USB_REQ_TYP_MASK)
     {
         case USB_REQ_TYP_STANDARD:
             handle_standard_request(setup);
+            break;
+        case USB_REQ_TYP_CLASS:
+            handle_class_request(setup);
             break;
         case USB_REQ_TYP_VENDOR:
             handle_vendor_request(setup);
@@ -274,30 +414,57 @@ static void handle_control_in(void)
 
 static void handle_control_out(void)
 {
-    R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG |
-                   UEP_R_RES_NAK | UEP_T_RES_NAK;
+    if(control_out_request == CDC_SET_LINE_CODING &&
+       R8_USB_RX_LEN == sizeof(cdc_line_coding_t))
+    {
+        cdc_line_coding_t requested;
+
+        memcpy(&requested, endpoint0_buffer, sizeof(requested));
+        if(!baud_supported(control_port, requested.baud_rate))
+        {
+            control_out_request = 0;
+            control_stall();
+            return;
+        }
+        line_coding[control_port] = requested;
+        line_coding_pending[control_port] = 1;
+        control_out_request = 0;
+        control_status();
+    }
+    else
+    {
+        R8_UEP0_CTRL = RB_UEP_R_TOG | RB_UEP_T_TOG |
+                       UEP_R_RES_NAK | UEP_T_RES_NAK;
+    }
 }
 
 static void reset_endpoints(void)
 {
     R8_UEP0_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
+    R8_UEP1_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
     R8_UEP7_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK | RB_UEP_AUTO_TOG;
     R8_USB_DEV_AD = 0;
     usb_configuration = 0;
     pending_address = 0;
+    control_out_request = 0;
     control_status_out = 0;
     control_remaining = 0;
+    usb_out[0].length = 0;
+    uart_zlp_pending = 0;
     vendor_out_length = 0;
+    line_coding_pending[0] = 0;
+    control_line_state[0] = 0;
 }
 
 static void hardware_init(void)
 {
     R8_USB_CTRL = 0;
-    R8_UEP4_1_MOD = 0;
+    R8_UEP4_1_MOD = RB_UEP1_RX_EN | RB_UEP1_TX_EN;
     R8_UEP2_3_MOD = 0;
     R8_UEP567_MOD = RB_UEP7_RX_EN | RB_UEP7_TX_EN;
 
     R16_UEP0_DMA = (uint16_t)(uint32_t)endpoint0_buffer;
+    R16_UEP1_DMA = (uint16_t)(uint32_t)endpoint1_buffer;
     R16_UEP7_DMA = (uint16_t)(uint32_t)endpoint7_buffer;
 
     reset_endpoints();
@@ -312,7 +479,19 @@ static void hardware_init(void)
 
 void UsbDevice_Init(void)
 {
+    uint8_t port;
+
     build_serial_descriptor();
+    memset(usb_out, 0, sizeof(usb_out));
+    for(port = 0; port < USB_CDC_PORTS; port++)
+    {
+        line_coding[port].baud_rate = 115200U;
+        line_coding[port].stop_bits = 0;
+        line_coding[port].parity = 0;
+        line_coding[port].data_bits = 8;
+    }
+    uart_rx_time = millis();
+    uart_rx_event = UartBridge_GetRxEventCount();
     activity_count = 0;
     hardware_init();
 }
@@ -364,6 +543,82 @@ uint8_t UsbDevice_VendorWrite(const uint8_t *data, uint8_t length)
     return 1;
 }
 
+static void send_uart_to_usb(void)
+{
+    uint32_t event = UartBridge_GetRxEventCount();
+    uint16_t available;
+    uint8_t length = 0;
+
+    if(event != uart_rx_event)
+    {
+        uart_rx_event = event;
+        uart_rx_time = millis();
+    }
+
+    if((R8_UEP1_CTRL & MASK_UEP_T_RES) != UEP_T_RES_NAK)
+        return;
+
+    available = UartBridge_Available();
+    if(available == 0U)
+    {
+        if(uart_zlp_pending &&
+           (uint32_t)(millis() - uart_rx_time) >= UART_USB_FLUSH_MS)
+        {
+            R8_UEP1_T_LEN = 0;
+            R8_UEP1_CTRL = (R8_UEP1_CTRL & ~MASK_UEP_T_RES) | UEP_T_RES_ACK;
+            uart_zlp_pending = 0;
+        }
+        return;
+    }
+
+    if(available < USB_PACKET_SIZE &&
+       (uint32_t)(millis() - uart_rx_time) < UART_USB_FLUSH_MS)
+        return;
+
+    while(length < USB_PACKET_SIZE &&
+          UartBridge_ReadByte(&endpoint1_buffer[USB_PACKET_SIZE + length]))
+        length++;
+
+    if(length)
+    {
+        R8_UEP1_T_LEN = length;
+        R8_UEP1_CTRL = (R8_UEP1_CTRL & ~MASK_UEP_T_RES) | UEP_T_RES_ACK;
+        uart_zlp_pending = length == USB_PACKET_SIZE;
+    }
+}
+
+static void write_usb_to_uart(void)
+{
+    usb_out_transfer_t *transfer = &usb_out[0];
+
+    if(transfer->length == 0U)
+        return;
+
+    while(transfer->index < transfer->length &&
+          UartBridge_WriteByte(endpoint1_buffer[transfer->index]))
+        transfer->index++;
+
+    if(transfer->index == transfer->length)
+    {
+        transfer->length = 0;
+        transfer->index = 0;
+        accept_out();
+    }
+}
+
+static void handle_data_out(void)
+{
+    if(R8_USB_RX_LEN)
+    {
+        usb_out[0].length = R8_USB_RX_LEN;
+        usb_out[0].index = 0;
+    }
+    else
+    {
+        accept_out();
+    }
+}
+
 static void process_interrupts(void)
 {
     uint8_t status;
@@ -373,7 +628,6 @@ static void process_interrupts(void)
         status = R8_USB_INT_ST;
         if(status & RB_UIS_SETUP_ACT)
         {
-            activity_count++;
             handle_setup();
         }
         else
@@ -385,6 +639,20 @@ static void process_interrupts(void)
                     break;
                 case UIS_TOKEN_OUT:
                     handle_control_out();
+                    break;
+                case UIS_TOKEN_OUT | 1:
+                    if(status & RB_UIS_TOG_OK)
+                    {
+                        R8_UEP1_CTRL = ((R8_UEP1_CTRL ^ RB_UEP_R_TOG) &
+                                        ~MASK_UEP_R_RES) | UEP_R_RES_NAK;
+                        handle_data_out();
+                        activity_count++;
+                    }
+                    break;
+                case UIS_TOKEN_IN | 1:
+                    R8_UEP1_CTRL = ((R8_UEP1_CTRL ^ RB_UEP_T_TOG) &
+                                    ~MASK_UEP_T_RES) | UEP_T_RES_NAK;
+                    activity_count++;
                     break;
                 case UIS_TOKEN_OUT | 7:
                     if((status & RB_UIS_TOG_OK) && R8_USB_RX_LEN)
@@ -408,7 +676,6 @@ static void process_interrupts(void)
     if(R8_USB_INT_FG & RB_UIF_BUS_RST)
     {
         reset_endpoints();
-        activity_count++;
         R8_USB_INT_FG = RB_UIF_BUS_RST;
     }
 
@@ -418,5 +685,30 @@ static void process_interrupts(void)
 
 void UsbDevice_Task(void)
 {
+    uint8_t discard;
+
     process_interrupts();
+
+    if(line_coding_pending[0])
+    {
+        line_coding_pending[0] = 0;
+        if(line_coding[0].baud_rate)
+            UartBridge_SetLineCoding(line_coding[0].baud_rate,
+                                     line_coding[0].stop_bits,
+                                     line_coding[0].parity,
+                                     line_coding[0].data_bits);
+    }
+
+    write_usb_to_uart();
+
+    if(usb_configuration)
+        send_uart_to_usb();
+    else
+    {
+        while(UartBridge_ReadByte(&discard))
+        {
+        }
+        uart_rx_event = UartBridge_GetRxEventCount();
+        uart_zlp_pending = 0;
+    }
 }

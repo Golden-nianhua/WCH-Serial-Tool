@@ -84,6 +84,7 @@ int main(void)
 
     timebase_init();
     led_init();
+    UartBridge_Init();
     UsbDevice_Init();
     DeviceConfig_Init();
     ConfigService_Init();
@@ -116,7 +117,6 @@ int main(void)
                     USB_ENUMERATION_WAIT_MS)
             {
                 UsbDevice_Disable();
-                UartBridge_Init();
                 UartBridge_ModemInit();
                 CH57x_BLEInit();
                 HAL_Init();

@@ -58,7 +58,12 @@ STATUS_NAMES = {
     4: "bad address", 5: "flash error", 6: "CRC error", 7: "bad state",
     STATUS_PENDING: "pending", STATUS_TIMEOUT: "timeout",
 }
-RF_ROLE_NAMES = {0: "off", 1: "USB receiver", 2: "UART node"}
+RF_ROLE_NAMES = {0: "off", 1: "USB receiver", 2: "UART node", 3: "BLE UART"}
+FIRMWARE_NAMES = {
+    1: "WCH Serial Tool 2.4G RF UART for CH570",
+    2: "WCH Serial Tool BLE UART for CH572",
+    3: "WCH Serial Tool USB/BLE UART for CH572",
+}
 
 
 class GUID(ctypes.Structure):
@@ -252,11 +257,15 @@ def target_command(device, code, remote=False, payload=b""):
 
 def show_info(device, remote=False):
     data = target_command(device, CMD_GET_INFO, remote)
-    major, minor, patch, hardware, cdc_ports, rf_ready, protocol, _, clock, start, end = struct.unpack_from("<8B3I", data)
-    print(f"firmware: {major}.{minor}.{patch}")
+    major, minor, patch, hardware, cdc_ports, rf_ready, protocol, firmware_type, clock, start, end = struct.unpack_from("<8B3I", data)
+    firmware_name = FIRMWARE_NAMES.get(
+        firmware_type, f"unknown type 0x{firmware_type:02X}"
+    )
+    print(f"firmware: {firmware_name}")
+    print(f"version: {major}.{minor}.{patch}")
     print(f"hardware: CH5{hardware:02X}")
     print(f"CDC ports: {cdc_ports}")
-    print(f"RF available: {'yes' if rf_ready else 'no'}")
+    print(f"wireless available: {'yes' if rf_ready else 'no'}")
     print(f"protocol: {protocol}")
     print(f"system clock: {clock} Hz")
     print(f"application: 0x{start:05X}-0x{end - 1:05X}")
@@ -361,7 +370,7 @@ def main():
         if not paths: print("no devices")
         for index, path in enumerate(paths): print(f"[{index}] {path}")
     else:
-        paths = find_paths(APP_PID)
+        paths = find_paths()
         if args.device is not None:
             if args.device >= len(paths):
                 raise RuntimeError(

@@ -27,7 +27,7 @@ static const gattAttrType_t service FLASH_CONST = {
 static uint8_t read_property = GATT_PROP_READ;
 static const uint8_t model[] FLASH_CONST = "CH572 BLE UART";
 static uint8_t serial[12];
-static const uint8_t firmware[] FLASH_CONST = "0.1.2";
+static const uint8_t firmware[] FLASH_CONST = "0.2.0";
 static const uint8_t hardware[] FLASH_CONST = "CH572";
 static const uint8_t manufacturer[] FLASH_CONST = "WCH Serial Tool";
 

@@ -89,8 +89,8 @@ void ConfigService_Init(void)
 static void make_info(config_packet_t *packet)
 {
     app_info_t info = {
-        0, 1, 2, 0x72, 0, 1, CFG_PROTOCOL_VERSION,
-        CFG_FIRMWARE_BLE_UART,
+        0, 2, 0, 0x72, 1, 1, CFG_PROTOCOL_VERSION,
+        CFG_FIRMWARE_USB_BLE_UART,
         GetSysClock(), IAP_APP_START, IAP_APP_END,
         R8_CHIP_ID, (R8_GLOB_CFG_INFO & RB_CFG_BOOT_EN) != 0,
         {0}, {0}
