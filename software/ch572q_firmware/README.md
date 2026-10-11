@@ -23,7 +23,7 @@ the proprietary 2.4 GHz RF transport is not included.
 - BLE configuration service: FFE0
   - FFE1: 64-byte configuration response, fragmented notifications
   - FFE2: 64-byte configuration request, fragmented writes
-- BLE advertising name: `CH9143BLE2U`
+- BLE advertising name: `WCH Serial Tool`
 - CH9143 discovery signature: manufacturer data
   `57 AB 07 01 43 48 39 31 34 33`
 - Standard Device Information service (`180A`): CH572 model/hardware,

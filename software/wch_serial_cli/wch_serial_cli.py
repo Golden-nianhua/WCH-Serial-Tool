@@ -13,6 +13,7 @@ USB_DEVICE_INTERFACE_GUID = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}"
 VID = 0x1A86
 APP_PID = 0x572D
 BLE_APP_PID = 0x572E
+CH32_APP_PID = 0x572F
 APP_EP_OUT = 0x07
 APP_EP_IN = 0x87
 
@@ -42,6 +43,7 @@ CMD_PAIR_DEVICE = 0x0A
 CMD_GET_RSSI = 0x0B
 CMD_GET_XTAL = 0x0C
 CMD_SET_XTAL = 0x0D
+CMD_GET_PHY = 0x0E
 CMD_RESET = 0x11
 CMD_ENTER_ISP = 0x12
 CMD_REMOTE_GET_INFO = 0x21
@@ -73,6 +75,7 @@ FIRMWARE_NAMES = {
     1: "WCH Serial Tool 2.4G RF UART for CH570",
     2: "WCH Serial Tool BLE UART for CH572",
     3: "WCH Serial Tool USB/BLE UART for CH572",
+    4: "WCH Serial Tool CH9143 BLE UART for CH32V208",
 }
 
 
@@ -214,7 +217,7 @@ async def _discover_ble(timeout=4.0):
         uuids = {uuid.lower() for uuid in advertisement.service_uuids}
         name = advertisement.local_name or device.name or ""
         if ((BLE_CONFIG_SERVICE in uuids and BLE_UART_SERVICE in uuids) or
-                name in ("WCH BLE UART", "CH9143BLE2U")):
+                name in ("WCH BLE UART", "CH9143BLE2U", "WCH Serial Tool")):
             devices.append((device.address, name, advertisement.rssi))
     devices.sort(key=lambda item: item[0])
     return devices
@@ -365,7 +368,8 @@ def show_info(device, remote=False):
     )
     print(f"firmware: {firmware_name}")
     print(f"version: {major}.{minor}.{patch}")
-    print(f"hardware: CH5{hardware:02X}")
+    hardware_name = "CH32V208" if firmware_type == 4 else f"CH5{hardware:02X}"
+    print(f"hardware: {hardware_name}")
     print(f"CDC ports: {cdc_ports}")
     print(f"wireless available: {'yes' if rf_ready else 'no'}")
     print(f"protocol: {protocol}")
@@ -378,7 +382,8 @@ def show_info(device, remote=False):
         print(f"chip ID: 0x{chip_id:02X}")
         print(f"MAC: {':'.join(f'{byte:02X}' for byte in mac)}")
         print(f"unique ID: {unique_id.hex().upper()}")
-        print(f"USB serial: CH572Q{mac.hex().upper()}")
+        serial_prefix = "CH208" if firmware_type == 4 else "CH572Q"
+        print(f"USB serial: {serial_prefix}{mac.hex().upper()}")
         print(f"factory bootloader: {'enabled' if boot_enabled else 'disabled'}")
 
 
@@ -414,6 +419,27 @@ def show_rssi(device, remote=False):
     rssi, = struct.unpack("<b", target_command(device, CMD_GET_RSSI, remote))
     direction = "receiver to node" if remote else "node to receiver"
     print(f"{direction} RSSI: {rssi} dBm")
+
+
+def show_phy(device):
+    deadline = time.monotonic() + 3.0
+    while True:
+        connected, tx_phy, rx_phy, update_status = struct.unpack(
+            "<4B", command(device, CMD_GET_PHY)
+        )
+        if not connected or update_status != 0xff or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+    phy_names = {0: "none", 1: "LE 1M", 2: "LE 2M"}
+    print(f"connected: {'yes' if connected else 'no'}")
+    print(f"TX PHY: {phy_names.get(tx_phy, f'unknown ({tx_phy})')}")
+    print(f"RX PHY: {phy_names.get(rx_phy, f'unknown ({rx_phy})')}")
+    if update_status == 0xff:
+        print("PHY update: pending" if connected else "PHY update: not available")
+    elif update_status == 0:
+        print("PHY update: success")
+    else:
+        print(f"PHY update: failed (0x{update_status:02X})")
 
 
 def get_xtal_status(device):
@@ -520,6 +546,7 @@ def main():
         target = sub.add_parser(name)
         target.add_argument("--remote", action="store_true",
                             help="run the command on the paired RF node")
+    sub.add_parser("phy", help="show the negotiated BLE data PHY")
     scan = sub.add_parser("scan")
     scan.add_argument("--seconds", type=float, default=2.0,
                       help="scan duration before displaying results")
@@ -550,7 +577,7 @@ def main():
 
     if args.action == "list":
         try:
-            paths = find_paths((APP_PID, BLE_APP_PID))
+            paths = find_paths((APP_PID, BLE_APP_PID, CH32_APP_PID))
         except RuntimeError:
             paths = []
         if not paths: print("no devices")
@@ -574,7 +601,7 @@ def main():
                 selected = [(0, args.ble)]
             device_class = BleDevice
         else:
-            paths = find_paths((APP_PID, BLE_APP_PID))
+            paths = find_paths((APP_PID, BLE_APP_PID, CH32_APP_PID))
             if args.device is not None:
                 if args.device >= len(paths):
                     raise RuntimeError(
@@ -595,6 +622,7 @@ def main():
                 elif args.action == "clear-pair": command(device, CMD_CLEAR_PAIR); print("pairing cleared")
                 elif args.action == "rf-config": show_rf_config(device, args.remote)
                 elif args.action == "rssi": show_rssi(device, args.remote)
+                elif args.action == "phy": show_phy(device)
                 elif args.action == "xtal": show_xtal_status(device)
                 elif args.action == "xtal-set":
                     set_xtal(device, args.capacitance, args.save)

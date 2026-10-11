@@ -97,6 +97,8 @@ Configuration中包含一个`bInterfaceClass = 0xFF`的Vendor接口，以及实�
 
 单Vendor设备不应继续使用表示IAD复合设备的`EF/02/01`，也不应保留只适用于复合接口定位的Subset Header。
 
+本项目的CH32V208固件采用这一结构：VID/PID为`1A86:572F`，Vendor为接口0，使用EP7 OUT `0x07`和EP7 IN `0x87`。
+
 ## 实现检查
 
 1. BOS声明的Descriptor Set长度与实际数组长度完全一致。

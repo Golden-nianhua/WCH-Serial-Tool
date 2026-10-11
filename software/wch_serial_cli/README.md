@@ -10,6 +10,7 @@ The application interface is matched using:
 VID:      0x1A86
 RF PID:   0x572D
 BLE PID:  0x572E
+CH32 PID: 0x572F
 GUID: {A1D4935B-4D76-4E6F-B623-6C856A67A8E9}
 ```
 
@@ -25,6 +26,7 @@ uv run wch_serial_cli.py clear-pair
 uv run wch_serial_cli.py rf-config
 uv run wch_serial_cli.py set-power 0x12
 uv run wch_serial_cli.py rssi
+uv run wch_serial_cli.py --ble 0 phy
 uv run wch_serial_cli.py info --remote
 uv run wch_serial_cli.py status --remote
 uv run wch_serial_cli.py rf-config --remote
@@ -64,6 +66,10 @@ The configured TX power is saved in flash on both the receiver and RF node.
 The `rssi` command reports node-to-receiver signal strength. Use
 `rssi --remote` for receiver-to-node signal strength. RSSI is available only
 while the RF link is connected.
+
+The `phy` command reports the negotiated BLE transmit and receive PHY on the
+CH32V208 firmware. Query it through the BLE configuration service while the
+link is active, for example `uv run wch_serial_cli.py --ble 0 phy`.
 
 `xtal-test` measures all eight HSE load-capacitance settings against USB SOF,
 prints their frequency errors, and restores the original setting.

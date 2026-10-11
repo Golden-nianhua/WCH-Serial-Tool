@@ -41,8 +41,9 @@ static uint8_t uart_ready = 1;
 static uint8_t uart_status_pending;
 
 static uint8_t scan_response[] = {
-    0x0c, GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'C', 'H', '9', '1', '4', '3', 'B', 'L', 'E', '2', 'U',
+    0x10, GAP_ADTYPE_LOCAL_NAME_COMPLETE,
+    'W', 'C', 'H', ' ', 'S', 'e', 'r', 'i', 'a', 'l', ' ',
+    'T', 'o', 'o', 'l',
     0x05, GAP_ADTYPE_SLAVE_CONN_INTERVAL_RANGE,
     LO_UINT16(BLE_UART_PREFERRED_MIN_INTERVAL),
     HI_UINT16(BLE_UART_PREFERRED_MIN_INTERVAL),
@@ -61,7 +62,7 @@ static uint8_t advertising_data[] = {
     'C', 'H', '9', '1', '4', '3'
 };
 
-static uint8_t device_name[GAP_DEVICE_NAME_LEN] = "CH9143BLE2U";
+static uint8_t device_name[GAP_DEVICE_NAME_LEN] = "WCH Serial Tool";
 
 static uint16_t process_event(uint8_t id, uint16_t events);
 static void state_changed(gapRole_States_t new_state, gapRoleEvent_t *event);

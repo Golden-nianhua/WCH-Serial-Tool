@@ -3,6 +3,8 @@ software/ch570q_firmware/obj/
 software/ch570q_firmware/.mrs/
 software/ch572q_firmware/obj/
 software/ch572q_firmware/.mrs/
+software/ch32v208w_firmware/obj/
+software/ch32v208w_firmware/.mrs/
 software/wch_serial_cli/.venv/
 software/wch_serial_cli/__pycache__/
 software/ch570q_tool/
