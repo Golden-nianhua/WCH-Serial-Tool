@@ -14,6 +14,7 @@ the proprietary 2.4 GHz RF transport is not included.
 - LED: PA7, high level turns the LED on
 - USB EP0: control transfers
 - USB EP1 OUT/IN: physical CDC UART data
+- USB EP2 IN: CDC serial-state notification endpoint
 - USB EP7 OUT/IN: WinUSB vendor configuration
 - BLE UART service: FFF0
   - FFF1: UART-to-BLE read/notification

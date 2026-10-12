@@ -47,26 +47,28 @@ static const uint8_t device_descriptor[] = {
     0x01
 };
 
-/* CDC0 uses EP1, CDC1 uses EP2, and WinUSB configuration uses EP7. */
+/* CDC data uses EP1/EP2, notifications use EP3/EP5 IN, and WinUSB uses EP7. */
 static const uint8_t configuration_descriptor[] = {
-    0x09, USB_DESCR_TYP_CONFIG, 0x96, 0x00, 0x05, 0x01, 0x00, 0x80, 0x32,
+    0x09, USB_DESCR_TYP_CONFIG, 0xa4, 0x00, 0x05, 0x01, 0x00, 0x80, 0x32,
 
     0x08, 0x0b, 0x00, 0x02, 0x02, 0x02, 0x01, 0x04,
-    0x09, USB_DESCR_TYP_INTERF, 0x00, 0x00, 0x00, 0x02, 0x02, 0x01, 0x04,
+    0x09, USB_DESCR_TYP_INTERF, 0x00, 0x00, 0x01, 0x02, 0x02, 0x01, 0x04,
     0x05, 0x24, 0x00, 0x10, 0x01,
     0x05, 0x24, 0x01, 0x00, 0x01,
     0x04, 0x24, 0x02, 0x02,
     0x05, 0x24, 0x06, 0x00, 0x01,
+    0x07, USB_DESCR_TYP_ENDP, 0x83, 0x03, 0x10, 0x00, 0x10,
     0x09, USB_DESCR_TYP_INTERF, 0x01, 0x00, 0x02, 0x0a, 0x00, 0x00, 0x04,
     0x07, USB_DESCR_TYP_ENDP, 0x01, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
     0x07, USB_DESCR_TYP_ENDP, 0x81, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
 
     0x08, 0x0b, 0x02, 0x02, 0x02, 0x02, 0x01, 0x05,
-    0x09, USB_DESCR_TYP_INTERF, 0x02, 0x00, 0x00, 0x02, 0x02, 0x01, 0x05,
+    0x09, USB_DESCR_TYP_INTERF, 0x02, 0x00, 0x01, 0x02, 0x02, 0x01, 0x05,
     0x05, 0x24, 0x00, 0x10, 0x01,
     0x05, 0x24, 0x01, 0x00, 0x03,
     0x04, 0x24, 0x02, 0x02,
     0x05, 0x24, 0x06, 0x02, 0x03,
+    0x07, USB_DESCR_TYP_ENDP, 0x85, 0x03, 0x10, 0x00, 0x10,
     0x09, USB_DESCR_TYP_INTERF, 0x03, 0x00, 0x02, 0x0a, 0x00, 0x00, 0x05,
     0x07, USB_DESCR_TYP_ENDP, 0x02, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
     0x07, USB_DESCR_TYP_ENDP, 0x82, 0x02, USB_PACKET_SIZE, 0x00, 0x00,
@@ -142,6 +144,8 @@ static const uint8_t vendor_descriptor[] = {
 __attribute__((aligned(4))) static uint8_t endpoint0_buffer[USB_PACKET_SIZE];
 __attribute__((aligned(4))) static uint8_t endpoint1_buffer[USB_PACKET_SIZE * 2U];
 __attribute__((aligned(4))) static uint8_t endpoint2_buffer[USB_PACKET_SIZE * 2U];
+__attribute__((aligned(4))) static uint8_t endpoint3_buffer[16U];
+__attribute__((aligned(4))) static uint8_t endpoint5_buffer[16U];
 __attribute__((aligned(4))) static uint8_t endpoint7_buffer[USB_PACKET_SIZE * 2U];
 
 static uint32_t uart_rx_time;
@@ -485,6 +489,10 @@ static void reset_endpoints(void)
     R8_UEP0_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
     R8_UEP1_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
     R8_UEP2_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK;
+    R8_UEP3_CTRL = UEP_T_RES_NAK;
+    R8_UEP3_T_LEN = 0;
+    R8_UEP5_CTRL = UEP_T_RES_NAK;
+    R8_UEP5_T_LEN = 0;
     R8_UEP7_CTRL = UEP_R_RES_ACK | UEP_T_RES_NAK | RB_UEP_AUTO_TOG;
     R8_USB_DEV_AD = 0;
     usb_configuration = 0;
@@ -513,12 +521,14 @@ static void hardware_init(void)
 {
     R8_USB_CTRL = 0;
     R8_UEP4_1_MOD = RB_UEP1_RX_EN | RB_UEP1_TX_EN;
-    R8_UEP2_3_MOD = RB_UEP2_RX_EN | RB_UEP2_TX_EN;
-    R8_UEP567_MOD = RB_UEP7_RX_EN | RB_UEP7_TX_EN;
+    R8_UEP2_3_MOD = RB_UEP2_RX_EN | RB_UEP2_TX_EN | RB_UEP3_TX_EN;
+    R8_UEP567_MOD = RB_UEP5_TX_EN | RB_UEP7_RX_EN | RB_UEP7_TX_EN;
 
     R16_UEP0_DMA = (uint16_t)(uint32_t)endpoint0_buffer;
     R16_UEP1_DMA = (uint16_t)(uint32_t)endpoint1_buffer;
     R16_UEP2_DMA = (uint16_t)(uint32_t)endpoint2_buffer;
+    R16_UEP3_DMA = (uint16_t)(uint32_t)endpoint3_buffer;
+    R16_UEP5_DMA = (uint16_t)(uint32_t)endpoint5_buffer;
     R16_UEP7_DMA = (uint16_t)(uint32_t)endpoint7_buffer;
 
     reset_endpoints();

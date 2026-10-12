@@ -6,10 +6,10 @@ CH572 USB/BLE UART固件在USB模式下是CDC与Vendor组成的复合设备；�
 
 | 功能 | USB接口 | 端点 |
 | --- | --- | --- |
-| 物理CDC串口 | 控制接口0、数据接口1 | EP1 OUT `0x01`、EP1 IN `0x81` |
+| 物理CDC串口 | 控制接口0、数据接口1 | 通知EP2 IN `0x82`，数据EP1 OUT `0x01`、EP1 IN `0x81` |
 | Vendor配置 | 接口2 | EP7 OUT `0x07`、EP7 IN `0x87` |
 
-VID/PID为`1A86:572E`，设备类为`EF/02/01`。配置描述符总长度为`0x005B`，共3个接口。Product字符串和Vendor接口字符串均为`WCH Serial Tool`，当前`bcdDevice`为`1.07`。
+VID/PID为`1A86:572E`，设备类为`EF/02/01`。配置描述符总长度为`0x0062`，共3个接口。Product字符串和Vendor接口字符串均为`WCH Serial Tool`，当前`bcdDevice`为`1.07`。
 
 ## WinUSB自动绑定
 

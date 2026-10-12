@@ -4,6 +4,8 @@ Current USB layout:
 
 - EP1 OUT/IN: physical CDC UART on PA2/PA3
 - EP2 OUT/IN: paired 2.4 GHz CDC UART
+- EP3 IN: physical CDC serial-state notification
+- EP5 IN: 2.4 GHz CDC serial-state notification
 - EP7 OUT/IN: WinUSB vendor configuration channel
 
 Runtime role selection:

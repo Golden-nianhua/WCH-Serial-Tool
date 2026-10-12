@@ -6,11 +6,11 @@ CH570固件是一个复合USB设备，VID/PID为`1A86:572D`，设备类为`EF/02
 
 | 功能 | USB接口 | 端点 |
 | --- | --- | --- |
-| 物理CDC串口 | 控制接口0、数据接口1 | EP1 OUT `0x01`、EP1 IN `0x81` |
-| 第二CDC串口 | 控制接口2、数据接口3 | EP2 OUT `0x02`、EP2 IN `0x82` |
+| 物理CDC串口 | 控制接口0、数据接口1 | 通知EP3 IN `0x83`，数据EP1 OUT `0x01`、EP1 IN `0x81` |
+| 第二CDC串口 | 控制接口2、数据接口3 | 通知EP5 IN `0x85`，数据EP2 OUT `0x02`、EP2 IN `0x82` |
 | Vendor配置 | 接口4 | EP7 OUT `0x07`、EP7 IN `0x87` |
 
-配置描述符总长度为`0x0096`，共5个接口。Product字符串和Vendor接口字符串均为`WCH Serial Tool`。
+配置描述符总长度为`0x00A4`，共5个接口。Product字符串和Vendor接口字符串均为`WCH Serial Tool`。
 
 ## WinUSB自动绑定
 
