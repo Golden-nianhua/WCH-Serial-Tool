@@ -47,7 +47,7 @@
 #endif
 
 /**
- * @brief  ÏµÍ³Ö÷ÆµÊ±ÖÓ£¨Hz£©
+ * @brief  ç³»ç»Ÿä¸»é¢‘æ—¶é’Ÿï¼ˆHzï¼‰
  */
 #ifndef	 FREQ_SYS
 #define  FREQ_SYS		100000000
@@ -78,7 +78,7 @@
 #include "ISP572.h"
 
  /**
-  * @brief  LSIÊ±ÖÓ£¨Hz£©
+  * @brief  LSIæ—¶é’Ÿï¼ˆHzï¼‰
   */
  extern uint32_t Freq_LSI;
 

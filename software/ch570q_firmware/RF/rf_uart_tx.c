@@ -31,7 +31,7 @@
 #define rfCBs         hostRfCBs
 #define pRfBuf        hostRfBuf
 #define rf_buf        rf_role_buf
-#define rf_buffer     hostRfBuffer
+#define rf_buffer     rf_role_stream_buffer
 #define RF_bound_Flag hostBoundFlag
 #define ledcount      hostLedCount
 #define rf_remote_message rf_role_control.remote_message
@@ -61,6 +61,8 @@ static volatile uint8_t remoteResetReady;
 static uint8_t remoteTransaction;
 static int8_t lastRssi;
 static uint8_t rssiValid;
+static uint32_t rfTxByteCount;
+static uint32_t rfTxErrorCount;
 
 #define RF_CONFIG_INFO_HEAD 0xA55A
 
@@ -131,7 +133,7 @@ static __attribute__((noinline)) uint8_t remote_prepare_response(
 }
 
 // tf status callbacks
-rfStatusCBs_t rfCBs =
+static const rfStatusCBs_t rfCBs =
 {
     rfProcessRx,
     rfProcessTx,
@@ -139,9 +141,8 @@ rfStatusCBs_t rfCBs =
     rfProcessTimeout,
 };
 
-#define  RF_BUF_LEN    128
 extern uint8_t rf_role_buf[RF_BUF_LEN];
-static struct simple_buf rf_buffer;
+extern struct simple_buf rf_buffer;
 struct simple_buf *pRfBuf = NULL;
 
 uint8_t volatile RF_bound_Flag;
@@ -242,6 +243,9 @@ static void rfProcessRx( rfPackage_t *pPkt )
         rssiValid = 1;
         if( pPkt->type == PKT_DATA_RSP_ACK )
         {
+            if(((rfPackage_t *)gTxBuf.TxBuf)->type == PKT_DATA_FLAG)
+                rfTxByteCount += ((rfPackage_t *)gTxBuf.TxBuf)->length -
+                                 PKT_DATA_OFFSET;
             // ���ݷ��ͳɹ�
             if( pPkt->length > PKT_DATA_OFFSET+1 )
             {
@@ -521,6 +525,7 @@ void RF_StatusQuery( void )
         {
             // ����ʧ�ܶ���
             PRINT(" resend fail.%d\n",gTxBuf.TxBuf[1]);
+            rfTxErrorCount++;
             gTxBuf.status = STA_IDLE;
         }
     }
@@ -536,7 +541,6 @@ void RF_StatusQuery( void )
  * @return  None.
  */
 
-__HIGH_CODE
 void RF_UartTxInit( void )
 {
     rfBoundInfo_t *pInfo;
@@ -553,6 +557,8 @@ void RF_UartTxInit( void )
     remoteResetReady = 0;
     remoteTransaction = 0;
     rssiValid = 0;
+    rfTxByteCount = 0;
+    rfTxErrorCount = 0;
     rf_buffer_create(&pRfBuf);
     GetMACAddress(mac);
     memcpy(deviceId, mac, sizeof(deviceId));
@@ -588,6 +594,16 @@ uint8_t RF_TxGetRssi(int8_t *rssi)
         return 1;
     *rssi = lastRssi;
     return 0;
+}
+
+uint32_t RF_TxGetByteCount(void)
+{
+    return rfTxByteCount;
+}
+
+uint32_t RF_TxGetErrorCount(void)
+{
+    return rfTxErrorCount;
 }
 
 uint8_t RF_LoadTxPower(uint8_t *value)

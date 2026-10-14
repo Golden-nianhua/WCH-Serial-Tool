@@ -1,5 +1,6 @@
 #include "CH57x_common.h"
 
+#include "mode_memory.h"
 #include "uart_bridge.h"
 #include "usb_device.h"
 
@@ -125,10 +126,10 @@ static const uint8_t vendor_descriptor[] = {
     'T', 0, 'o', 0, 'o', 0, 'l', 0
 };
 
-__attribute__((aligned(4))) static uint8_t endpoint0_buffer[USB_PACKET_SIZE];
-__attribute__((aligned(4))) static uint8_t endpoint1_buffer[USB_PACKET_SIZE * 2U];
-__attribute__((aligned(4))) static uint8_t endpoint2_buffer[16U];
-__attribute__((aligned(4))) static uint8_t endpoint7_buffer[USB_PACKET_SIZE * 2U];
+#define endpoint0_buffer ((uint8_t *)mode_memory)
+#define endpoint1_buffer ((uint8_t *)mode_memory + USB_PACKET_SIZE)
+#define endpoint2_buffer ((uint8_t *)mode_memory + USB_PACKET_SIZE * 3U)
+#define endpoint7_buffer ((uint8_t *)mode_memory + USB_PACKET_SIZE * 3U + 16U)
 
 static uint32_t uart_rx_time;
 static uint32_t uart_rx_event;
@@ -228,22 +229,8 @@ static uint8_t port_from_interface(uint16_t interface)
 
 static uint8_t baud_supported(uint8_t port, uint32_t baud)
 {
-    uint32_t actual;
-    uint32_t error;
-
     (void)port;
-    if(baud == 0U)
-        return 0;
-    if(baud <= 1000000U)
-        return 1;
-    if(baud > 12000000U)
-        return 0;
-    if(baud == 12000000U || baud == 6000000U)
-        return 1;
-
-    actual = UartBridge_CalculateBaud(baud);
-    error = actual > baud ? actual - baud : baud - actual;
-    return error * 100U <= baud * 2U;
+    return UartBridge_BaudSupported(baud);
 }
 
 static void handle_class_request(PUSB_SETUP_REQ setup)
@@ -501,6 +488,7 @@ void UsbDevice_Init(void)
 {
     uint8_t port;
 
+    memset(mode_memory, 0, MODE_MEMORY_SIZE);
     build_serial_descriptor();
     memset(usb_out, 0, sizeof(usb_out));
     for(port = 0; port < USB_CDC_PORTS; port++)

@@ -1,8 +1,42 @@
 # WCH Serial CLI
 
-Requires Windows 10/11 and `uv`. The tool has no third-party Python
-dependencies. Do not manually create or activate a virtual environment;
-`uv run` manages the Python runtime directly from `pyproject.toml`.
+Requires Windows 10/11 and `uv`. Do not manually create or activate a virtual
+environment; `uv run` manages Python and the dependencies from
+`pyproject.toml`.
+
+## Two-port UART integrity test
+
+Cross-connect TX to RX and share GND between the CH57x UART and an FT232 or
+another reference UART, using compatible logic levels. For wireless tests,
+connect the reference adapter to the RF node and select the receiver's RF COM
+port. Pass the CH57x COM port, reference COM port, and their common baud rate:
+
+```powershell
+uv run uart_loopback_test.py 83 84 3000000
+uv run uart_loopback_test.py COM83 COM84 115200 --bytes 1048576
+```
+
+The test sends different deterministic binary streams through both ports at
+the same time, checks each stream at the opposite port, and stops at the first
+missing or mismatched byte.
+
+To isolate a direction, A is the first (CH57x) port and B is the second
+(reference) port:
+
+```powershell
+uv run uart_loopback_test.py 93 78 3000000 --direction a-to-b
+uv run uart_loopback_test.py 93 78 3000000 --direction b-to-a
+uv run uart_loopback_test.py 93 78 3000000 --chunk 64 --interval 0.01
+```
+
+Both directions report their write result and receive byte count on failure,
+including the first differing offset and nearby bytes. A write timeout does
+not establish how many bytes the Windows driver transmitted. Each chunk is
+verified before the next is sent; this checks data integrity and does not
+measure the maximum continuous streaming rate.
+
+The CH572 RF CDC port is limited to 1.5 Mbaud. Its physical CDC UART can use
+3 Mbaud when the generated baud error is within the firmware's 2% limit.
 
 The application interface is matched using:
 

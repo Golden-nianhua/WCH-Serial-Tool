@@ -3,22 +3,25 @@
 #include "rf_uart_tx.h"
 #include "uart_bridge.h"
 
-#define UART_RX_BUFFER_SIZE 1024U
+#define UART_RX_BUFFER_SIZE 512U
 #define UART_RX_BUFFER_MASK (UART_RX_BUFFER_SIZE - 1U)
 
 static uint8_t rx_buffer[UART_RX_BUFFER_SIZE];
 static volatile uint16_t rx_write;
 static volatile uint16_t rx_read;
 static volatile uint32_t rx_event_count;
+static volatile uint32_t rx_drop_count;
+static volatile uint32_t line_error_count;
 static uint32_t current_baud;
 
 static uint32_t actual_baud(uint32_t baud)
 {
-    uint32_t divisor = (FREQ_SYS + baud * 4U) / (baud * 8U);
+    uint32_t clock = GetSysClock();
+    uint32_t divisor = (clock + baud * 4U) / (baud * 8U);
 
     if(divisor == 0U)
         divisor = 1U;
-    return FREQ_SYS / (8U * divisor);
+    return clock / (8U * divisor);
 }
 
 void UartBridge_Init(void)
@@ -38,14 +41,15 @@ void UartBridge_Init(void)
 void UartBridge_SetLineCoding(uint32_t baud, uint8_t stop_bits,
                               uint8_t parity, uint8_t data_bits)
 {
+    uint32_t clock = GetSysClock();
     uint32_t divisor;
     uint8_t lcr = 0;
 
-    divisor = (FREQ_SYS + baud * 4U) / (baud * 8U);
+    divisor = (clock + baud * 4U) / (baud * 8U);
     if(divisor == 0U)
         divisor = 1U;
     R16_UART_DL = (uint16_t)divisor;
-    current_baud = FREQ_SYS / (8U * divisor);
+    current_baud = clock / (8U * divisor);
     UART_ByteTrigCfg(baud >= 1000000U ? UART_4BYTE_TRIG : UART_1BYTE_TRIG);
     if(data_bits >= 5U && data_bits <= 8U)
         lcr = data_bits - 5U;
@@ -75,6 +79,26 @@ uint32_t UartBridge_GetBaud(void)
 uint32_t UartBridge_CalculateBaud(uint32_t baud)
 {
     return actual_baud(baud);
+}
+
+uint8_t UartBridge_BaudSupported(uint32_t baud)
+{
+    uint32_t clock;
+    uint32_t divisor;
+    uint32_t actual;
+    uint32_t error;
+
+    if(baud == 0U || baud > 3000000U)
+        return 0;
+
+    clock = GetSysClock();
+    divisor = (clock + baud * 4U) / (baud * 8U);
+    if(divisor == 0U || divisor > 0xffffU)
+        return 0;
+
+    actual = clock / (8U * divisor);
+    error = actual > baud ? actual - baud : baud - actual;
+    return error * 100U <= baud * 2U;
 }
 
 __HIGH_CODE
@@ -108,6 +132,16 @@ uint32_t UartBridge_GetRxEventCount(void)
     return rx_event_count;
 }
 
+uint32_t UartBridge_GetRxDropCount(void)
+{
+    return rx_drop_count;
+}
+
+uint32_t UartBridge_GetLineErrorCount(void)
+{
+    return line_error_count;
+}
+
 __INTERRUPT
 __HIGH_CODE
 void UART_IRQHandler(void)
@@ -117,9 +151,12 @@ void UART_IRQHandler(void)
     if(interrupt == UART_II_LINE_STAT)
     {
         (void)UART_GetLinSTA();
+        line_error_count++;
     }
-    else if(interrupt == UART_II_RECV_RDY ||
-            interrupt == UART_II_RECV_TOUT)
+
+    if(interrupt == UART_II_LINE_STAT ||
+       interrupt == UART_II_RECV_RDY ||
+       interrupt == UART_II_RECV_TOUT)
     {
         while(R8_UART_RFC)
         {
@@ -132,9 +169,14 @@ void UART_IRQHandler(void)
                 rx_write = next;
                 rx_event_count++;
             }
+            else
+            {
+                rx_drop_count++;
+            }
         }
     }
-    else if(hostRfRxFlag)
+
+    if(hostRfRxFlag && R8_UART_TFC < UART_FIFO_SIZE)
     {
         uint8_t data[UART_FIFO_SIZE];
         typeBufSize length = UART_FIFO_SIZE - R8_UART_TFC;

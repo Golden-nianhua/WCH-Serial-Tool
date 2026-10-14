@@ -1,14 +1,15 @@
 # CH572Q USB/BLE UART firmware
 
 CH572Q firmware providing one physical UART through either USB CDC or BLE UART.
-USB CDC plus WinUSB configuration mode and BLE UART mode are mutually exclusive;
+The image contains a USB selector application and a separate BLE application;
 the proprietary 2.4 GHz RF transport is not included.
 
 ## Interfaces
 
 - On power-up, USB has 500 ms to enumerate
 - USB enumerated: USB CDC on EP1 plus WinUSB configuration on EP7; BLE stays disabled
-- USB not enumerated: USB is disabled and BLE UART mode starts
+- USB not enumerated: the selector requests a software reset, then the boot
+  stub starts the BLE UART application
 - UART0 in both modes: PA2 RX, PA3 TX, default 115200 8-N-1
 - MODEM outputs in BLE mode: PA0/UDM RTS#, PA1/UDP DTR#, active low
 - LED: PA7, high level turns the LED on
@@ -21,14 +22,14 @@ the proprietary 2.4 GHz RF transport is not included.
   - FFF2: BLE-to-UART write/write without response
   - FFF3: CH9143-compatible UART and MODEM configuration, notification,
     and command response
-- BLE configuration service: FFE0
-  - FFE1: 64-byte configuration response, fragmented notifications
-  - FFE2: 64-byte configuration request, fragmented writes
 - BLE advertising name: `WCH Serial Tool`
 - CH9143 discovery signature: manufacturer data
   `57 AB 07 01 43 48 39 31 34 33`
 - Standard Device Information service (`180A`): CH572 model/hardware,
   MAC-derived serial number, firmware `0.2.0`, and manufacturer
+
+The BLE application has its own 5 KiB protocol heap. USB configuration,
+flash writes, and factory-ISP entry are linked only into the USB selector.
 
 FFF3 implements the CH9143 UART transport control used by BleComManager:
 
@@ -52,23 +53,38 @@ GUID, 64-byte configuration packets, unique USB serial generation, reset, and
 factory-ISP entry support. Its USB product and interface name is
 `WCH Serial Tool`. The information response reports one CDC port and identifies
 this as the combined USB/BLE UART firmware.
-Each BLE configuration fragment begins with its byte offset; the remaining
-1-19 bytes belong to the unchanged 64-byte vendor configuration packet.
 
-The USB CDC line-coding policy matches the CH570 physical UART implementation:
+USB mode uses a 24 MHz system clock. Its CDC line-coding policy is:
 
-- Baud rates up to 1 Mbps are accepted
-- 6 Mbps and 12 Mbps are accepted directly
-- Other rates above 1 Mbps are accepted only when the UART divider error is at most 2%
-- Rates above 12 Mbps are rejected
+- Rates through 3 Mbps are accepted only when the UART divider error is at most 2%
+- 3 Mbps, 1.5 Mbps and 1 Mbps use exact integer dividers; 2 Mbps is unsupported
+- 921600 bps is unsupported because its actual rate would be 1 Mbps
+- Rates above 3 Mbps are rejected
 - Unsupported `SET_LINE_CODING` requests are stalled so the host can report failure
 
-The system clock remains fixed at 100 MHz in both USB and BLE modes.
+BLE mode switches to 100 MHz before the BLE stack starts. UART divisors are
+recalculated after the clock switch. The same 2% error limit applies to FFF3
+UART configuration. For example, 115200 bps is supported, while 921600 bps and
+1 Mbps are rejected at 100 MHz. A rejected FFF3 write returns a GATT value
+error instead of silently keeping the previous baud rate.
+
+The BLE stack allows four packets per connection event. UART notification
+scheduling uses up to four packets for one-way UART-to-BLE traffic. After
+BLE-to-UART traffic is observed, it limits notifications to two packets for
+100 ms, leaving room for CH9143 ready/paused control and incoming writes during
+full-duplex traffic. It uses the WCH
+high-speed example's 496-byte link buffers, and reserves seven packet buffers
+from a 5 KiB heap. UART notifications are capped at 244 bytes for the common
+247-byte ATT MTU. Four seconds after connecting, the firmware requests the
+official speed-test interval of 7.5 ms. The PHY remains at 1 Mbps for
+BleComManager compatibility. Actual throughput still depends on the central's
+negotiated MTU and connection interval. Input beyond the resulting link rate
+is dropped when the UART receive ring becomes full.
 
 ## HSE calibration
 
 In USB mode, the firmware can test the eight internal 32 MHz crystal load
-settings from 6 pF through 20 pF. It compares 100 MHz SysTick counts with the
+settings from 6 pF through 20 pF. It compares 24 MHz SysTick counts with the
 host's 1 ms USB SOF reference. Temporary settings do not write flash, and the
 saved setting is restored before USB or BLE starts on the next boot.
 
@@ -81,16 +97,19 @@ uv run ..\wch_serial_cli\wch_serial_cli.py xtal-calibrate --save
 
 ## Memory layout
 
-- `0x00000000-0x00001FFF`: 8 KiB boot reservation
-- `0x00002000-0x00039FFF`: application
+- `0x00000000-0x00001FFF`: boot jump and reservation
+- `0x00002000-0x00011FFF`: USB selector, CDC, and WinUSB configuration
+- `0x00012000-0x00039FFF`: BLE UART application
+- `0x0003A000-0x0003AFFF`: persistent settings
 - SRAM: 12 KiB
 
 ## Build
 
-Open the project in MounRiver Studio or run:
+Run:
 
 ```powershell
 .\build.ps1
 ```
 
-Both builds produce `obj/ch572q_firmware.hex`.
+The build creates separate USB and BLE ELF/map files, then combines them into
+the single programming image `obj/ch572q_firmware.hex`.

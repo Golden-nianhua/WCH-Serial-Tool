@@ -29,7 +29,7 @@ __attribute__((__aligned__(4))) uint8_t RxBuf[264]; // ����DMA buf��
 
 rfipTx_t gTxParam;
 rfipRx_t gRxParam;
-rfStatusCBs_t *pCbs;
+const rfStatusCBs_t *pCbs;
 
 /*******************************************************************************
  * @fn      LLE_IRQHandler
@@ -183,6 +183,7 @@ void rf_rx_start( uint32_t rx_us )
 __HIGH_CODE
 void RF_ProcessCallBack( rfRole_States_t sta,uint8_t id  )
 {
+    (void)id;
     if( sta&RF_STATE_RX )
     {
         if( pCbs && pCbs->pfnRxCB ) pCbs->pfnRxCB( (rfPackage_t *)RxBuf );
@@ -210,7 +211,7 @@ void RF_ProcessCallBack( rfRole_States_t sta,uint8_t id  )
  *
  * @return  None.
  */
-void RFRole_RegisterStatusCbs( rfStatusCBs_t * p )
+void RFRole_RegisterStatusCbs( const rfStatusCBs_t * p )
 {
     pCbs = p;
 }

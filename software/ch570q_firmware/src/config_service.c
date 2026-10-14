@@ -38,6 +38,16 @@ typedef struct __attribute__((packed))
     uint16_t server_data;
     uint32_t uart_baud;
     uint32_t rf_uart_baud;
+    uint32_t uart_rx_bytes;
+    uint32_t uart_rx_drops;
+    uint32_t uart_line_errors;
+    uint32_t rf_uart_bytes;
+    uint32_t rf_errors;
+    uint32_t usb_rf_submitted;
+    uint32_t usb_rf_completed;
+    uint16_t rf_queue_depth;
+    uint8_t rf_data_status;
+    uint8_t usb_pending_length;
 } app_status_t;
 
 typedef struct __attribute__((packed))
@@ -157,7 +167,7 @@ void ConfigService_Task(void)
     else if(packet.command == CFG_CMD_GET_INFO)
     {
         app_info_t info = {
-            0, 4, 8, 0x72, 2, 1, CFG_PROTOCOL_VERSION,
+            0, 4, 15, 0x72, 2, 1, CFG_PROTOCOL_VERSION,
             CFG_FIRMWARE_RF_UART,
             GetSysClock(), IAP_APP_START, IAP_APP_END,
             R8_CHIP_ID, (R8_GLOB_CFG_INFO & RB_CFG_BOOT_EN) != 0,
@@ -187,6 +197,16 @@ void ConfigService_Task(void)
         status.rf_role = RfTransport_GetRole();
         status.uart_baud = UartBridge_GetBaud();
         status.rf_uart_baud = RfTransport_GetUartBaud();
+        status.uart_rx_bytes = UartBridge_GetRxEventCount();
+        status.uart_rx_drops = UartBridge_GetRxDropCount();
+        status.uart_line_errors = UartBridge_GetLineErrorCount();
+        status.rf_uart_bytes = RfTransport_GetByteCount();
+        status.rf_errors = RfTransport_GetErrorCount();
+        status.usb_rf_submitted = UsbDevice_GetRfSubmittedCount();
+        status.usb_rf_completed = UsbDevice_GetRfCompletedCount();
+        status.rf_queue_depth = RF_RxGetQueueDepth();
+        status.rf_data_status = RF_RxGetDataStatus();
+        status.usb_pending_length = RfTransport_GetPendingLength();
         RfTransport_GetPairStatus(&status.paired, &status.pair_state,
                                   &server_data);
         status.server_data = server_data;

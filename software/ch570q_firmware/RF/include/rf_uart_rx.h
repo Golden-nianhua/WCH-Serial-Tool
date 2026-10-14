@@ -18,9 +18,6 @@ extern "C"
 #include "buf.h"
 #include "rf.h"
 
-#define   RF_BUF_LEN   128
-
-
 #define  CONN_INTERVAL     10
 #define  CONN_TIMEOUT      100
 #define  CONN_PHY_TYPE     1   // 2M
@@ -50,6 +47,10 @@ extern rf_role_control_t rf_role_control;
 
 void RF_UartRxInit( void );
 uint8_t RF_RxQuery( void *buf, typeBufSize *len );
+uint32_t RF_RxGetByteCount(void);
+uint32_t RF_RxGetErrorCount(void);
+uint16_t RF_RxGetQueueDepth(void);
+uint8_t RF_RxGetDataStatus(void);
 void RF_ScanStart(void);
 uint8_t RF_ScanIsActive(void);
 uint8_t RF_ScanGetResults(rf_scan_device_t *devices, uint8_t capacity);

@@ -91,6 +91,7 @@ typedef struct
 
 #define  DATA_LEN_MAX_TX    (251)  //!< the max length of rf tx. [251]
 #define  BUF_LEN_TX         (DATA_LEN_MAX_TX+PKT_HEAD_LEN)
+#define  RF_BUF_LEN         512
 
 #define  DATA_LEN_MAX_RX     BUF_LEN_TX  //!< the max length of rf rx.
 
@@ -231,7 +232,7 @@ void rf_rx_start( uint32_t rx_us );
 void rf_rx_set_phy_type( uint8_t phy );
 
 void RFRole_Init(void);
-void RFRole_RegisterStatusCbs( rfStatusCBs_t * p );
+void RFRole_RegisterStatusCbs( const rfStatusCBs_t * p );
 
 #ifdef __cplusplus
 }

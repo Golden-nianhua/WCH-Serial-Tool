@@ -16,6 +16,7 @@ static volatile uint16_t rx_read;
 static volatile uint16_t tx_write;
 static volatile uint16_t tx_read;
 static volatile uint32_t rx_event_count;
+static uint32_t requested_baud = 115200U;
 static uint32_t current_baud = 115200U;
 
 void UartBridge_Init(void)
@@ -26,9 +27,9 @@ void UartBridge_Init(void)
     UART_Remap(ENABLE, UART_TX_REMAP_PA3, UART_RX_REMAP_PA2);
     UART_DefInit();
     UART_ByteTrigCfg(UART_1BYTE_TRIG);
+    UartBridge_SetBaud(115200U);
     UART_INTCfg(ENABLE, RB_IER_RECV_RDY | RB_IER_LINE_STAT);
     PFIC_EnableIRQ(UART_IRQn);
-    current_baud = 115200U;
 }
 
 void UartBridge_ModemInit(void)
@@ -61,13 +62,20 @@ void UartBridge_Task(void)
 
 void UartBridge_SetBaud(uint32_t baud)
 {
-    uint32_t divisor = (FREQ_SYS + baud * 4U) / (baud * 8U);
+    uint32_t clock = GetSysClock();
+    uint32_t divisor = (clock + baud * 4U) / (baud * 8U);
 
     if(divisor == 0U)
         divisor = 1U;
     R16_UART_DL = (uint16_t)divisor;
-    current_baud = FREQ_SYS / (8U * divisor);
+    requested_baud = baud;
+    current_baud = clock / (8U * divisor);
     UART_ByteTrigCfg(baud >= 1000000U ? UART_4BYTE_TRIG : UART_1BYTE_TRIG);
+}
+
+void UartBridge_ClockChanged(void)
+{
+    UartBridge_SetBaud(requested_baud);
 }
 
 uint8_t UartBridge_Configure(uint32_t baud, uint8_t data_bits,
@@ -75,7 +83,8 @@ uint8_t UartBridge_Configure(uint32_t baud, uint8_t data_bits,
 {
     uint8_t line_control;
 
-    if(baud == 0U || data_bits < 5U || data_bits > 8U ||
+    if(!UartBridge_BaudSupported(baud) ||
+       data_bits < 5U || data_bits > 8U ||
        stop_bits < 1U || stop_bits > 2U || parity > 4U)
         return 1;
 
@@ -91,6 +100,26 @@ uint8_t UartBridge_Configure(uint32_t baud, uint8_t data_bits,
     UartBridge_SetBaud(baud);
     R8_UART_LCR = line_control;
     return 0;
+}
+
+uint8_t UartBridge_BaudSupported(uint32_t baud)
+{
+    uint32_t clock;
+    uint32_t divisor;
+    uint32_t actual;
+    uint32_t error;
+
+    if(baud == 0U || baud > 3000000U)
+        return 0;
+
+    clock = GetSysClock();
+    divisor = (clock + baud * 4U) / (baud * 8U);
+    if(divisor == 0U || divisor > 0xffffU)
+        return 0;
+
+    actual = clock / (8U * divisor);
+    error = actual > baud ? actual - baud : baud - actual;
+    return error * 100U <= baud * 2U;
 }
 
 void UartBridge_SetLineCoding(uint32_t baud, uint8_t stop_bits,
@@ -111,11 +140,12 @@ void UartBridge_SetBreak(uint8_t enabled)
 
 uint32_t UartBridge_CalculateBaud(uint32_t baud)
 {
-    uint32_t divisor = (FREQ_SYS + baud * 4U) / (baud * 8U);
+    uint32_t clock = GetSysClock();
+    uint32_t divisor = (clock + baud * 4U) / (baud * 8U);
 
     if(divisor == 0U)
         divisor = 1U;
-    return FREQ_SYS / (8U * divisor);
+    return clock / (8U * divisor);
 }
 
 uint32_t UartBridge_GetBaud(void)
@@ -126,6 +156,31 @@ uint32_t UartBridge_GetBaud(void)
 uint16_t UartBridge_Available(void)
 {
     return (rx_write - rx_read) & UART_RX_BUFFER_MASK;
+}
+
+uint16_t UartBridge_Peek(uint8_t *data, uint16_t capacity)
+{
+    uint16_t available = UartBridge_Available();
+    uint16_t index = rx_read;
+    uint16_t length = 0;
+
+    if(capacity > available)
+        capacity = available;
+    while(length < capacity)
+    {
+        data[length++] = rx_buffer[index];
+        index = (index + 1U) & UART_RX_BUFFER_MASK;
+    }
+    return length;
+}
+
+void UartBridge_Consume(uint16_t length)
+{
+    uint16_t available = UartBridge_Available();
+
+    if(length > available)
+        length = available;
+    rx_read = (rx_read + length) & UART_RX_BUFFER_MASK;
 }
 
 uint8_t UartBridge_ReadByte(uint8_t *data)

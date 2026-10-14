@@ -38,6 +38,8 @@ void RF_StatusQuery( void );
 void RF_GetPairStatus(uint8_t *paired, uint8_t *state, uint16_t *server_data);
 uint8_t RF_ClearPairing(void);
 uint8_t RF_TxGetRssi(int8_t *rssi);
+uint32_t RF_TxGetByteCount(void);
+uint32_t RF_TxGetErrorCount(void);
 uint8_t RF_LoadTxPower(uint8_t *value);
 uint8_t RF_SaveTxPower(uint8_t value);
 uint8_t RF_LoadXtalCap(uint8_t *value);

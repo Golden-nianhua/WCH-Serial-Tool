@@ -1,6 +1,5 @@
 #include "CH57x_common.h"
 
-#include "ble_uart_app.h"
 #include "config_protocol.h"
 #include "config_service.h"
 #include "device_config.h"
@@ -133,9 +132,7 @@ static void make_status(config_packet_t *packet)
     memset(&status, 0, sizeof(status));
     status.usb_configured = UsbDevice_IsConfigured();
     status.wireless_ready = 1;
-    status.wireless_mode = UsbDevice_IsConfigured() ? 0 : 3;
-    status.paired = BleUart_IsConnected();
-    status.pair_state = BleUart_GetState();
+    status.wireless_mode = 0;
     status.uart_baud = UartBridge_GetBaud();
     status.wireless_uart_baud = status.uart_baud;
     Config_MakeResponse(packet, packet, CFG_STATUS_OK,
@@ -183,9 +180,7 @@ void ConfigService_ProcessPacket(const uint8_t *request, uint8_t *response)
     }
     else if(packet.command == CFG_CMD_GET_PAIR)
     {
-        const pair_status_t pair = {
-            BleUart_IsConnected(), BleUart_GetState(), 0
-        };
+        const pair_status_t pair = {0, 0, 0};
         Config_MakeResponse(&packet, &packet, CFG_STATUS_OK,
                             &pair, sizeof(pair));
     }
@@ -208,32 +203,19 @@ void ConfigService_ProcessPacket(const uint8_t *request, uint8_t *response)
         {
             const radio_config_t *config =
                 (const radio_config_t *)packet.payload;
-            uint8_t previous = DeviceConfig_GetTxPower();
             uint8_t status = CFG_STATUS_OK;
 
             if(!DeviceConfig_PowerSupported(config->tx_power))
                 status = CFG_STATUS_STATE;
-            else if(!UsbDevice_IsConfigured() &&
-                    BleUart_SetTxPower(config->tx_power) != 0)
-                status = CFG_STATUS_STATE;
             else if(DeviceConfig_SetTxPower(config->tx_power))
-            {
-                if(!UsbDevice_IsConfigured())
-                    BleUart_SetTxPower(previous);
                 status = CFG_STATUS_FLASH;
-            }
             Config_MakeResponse(&packet, &packet, status, NULL, 0);
         }
     }
     else if(packet.command == CFG_CMD_GET_RSSI)
     {
-        int8_t rssi = BleUart_GetRssi();
-
         Config_MakeResponse(&packet, &packet,
-                            BleUart_IsConnected() ? CFG_STATUS_OK
-                                                  : CFG_STATUS_STATE,
-                            &rssi,
-                            BleUart_IsConnected() ? sizeof(rssi) : 0);
+                            CFG_STATUS_STATE, NULL, 0);
     }
     else if(packet.command == CFG_CMD_GET_XTAL)
     {
@@ -274,15 +256,9 @@ void ConfigService_ProcessPacket(const uint8_t *request, uint8_t *response)
     }
     else if(packet.command == CFG_CMD_ENTER_ISP)
     {
-        if(!UsbDevice_IsConfigured())
-            Config_MakeResponse(&packet, &packet,
-                                CFG_STATUS_STATE, NULL, 0);
-        else
-        {
-            Config_MakeResponse(&packet, &packet, CFG_STATUS_OK, NULL, 0);
-            isp_pending = 1;
-            reset_time = SYS_GetSysTickCnt() + GetSysClock() / 10U;
-        }
+        Config_MakeResponse(&packet, &packet, CFG_STATUS_OK, NULL, 0);
+        isp_pending = 1;
+        reset_time = SYS_GetSysTickCnt() + GetSysClock() / 10U;
     }
     else
     {

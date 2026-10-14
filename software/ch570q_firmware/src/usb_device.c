@@ -144,8 +144,7 @@ static const uint8_t vendor_descriptor[] = {
 __attribute__((aligned(4))) static uint8_t endpoint0_buffer[USB_PACKET_SIZE];
 __attribute__((aligned(4))) static uint8_t endpoint1_buffer[USB_PACKET_SIZE * 2U];
 __attribute__((aligned(4))) static uint8_t endpoint2_buffer[USB_PACKET_SIZE * 2U];
-__attribute__((aligned(4))) static uint8_t endpoint3_buffer[16U];
-__attribute__((aligned(4))) static uint8_t endpoint5_buffer[16U];
+__attribute__((aligned(4))) static uint8_t notification_buffer[16U];
 __attribute__((aligned(4))) static uint8_t endpoint7_buffer[USB_PACKET_SIZE * 2U];
 
 static uint32_t uart_rx_time;
@@ -164,6 +163,8 @@ static uint8_t control_out_request;
 static uint8_t control_port;
 static uint8_t control_status_out;
 static uint32_t activity_count;
+static uint32_t rf_submitted_count;
+static uint32_t rf_completed_count;
 static uint32_t sof_first_tick;
 static uint32_t sof_last_tick;
 static uint32_t sof_deadline_tick;
@@ -260,23 +261,9 @@ static uint8_t port_from_interface(uint16_t interface)
 
 static uint8_t baud_supported(uint8_t port, uint32_t baud)
 {
-    uint32_t actual;
-    uint32_t error;
-
-    if(baud == 0U)
+    if(port == 1U && baud > 1500000U)
         return 0;
-    if(port == 1U)
-        return baud <= 1500000U;
-    if(baud <= 1000000U)
-        return 1;
-    if(baud > 12000000U)
-        return 0;
-    if(baud == 12000000U || baud == 6000000U)
-        return 1;
-
-    actual = UartBridge_CalculateBaud(baud);
-    error = actual > baud ? actual - baud : baud - actual;
-    return error * 100U <= baud * 2U;
+    return UartBridge_BaudSupported(baud);
 }
 
 static void handle_class_request(PUSB_SETUP_REQ setup)
@@ -527,8 +514,8 @@ static void hardware_init(void)
     R16_UEP0_DMA = (uint16_t)(uint32_t)endpoint0_buffer;
     R16_UEP1_DMA = (uint16_t)(uint32_t)endpoint1_buffer;
     R16_UEP2_DMA = (uint16_t)(uint32_t)endpoint2_buffer;
-    R16_UEP3_DMA = (uint16_t)(uint32_t)endpoint3_buffer;
-    R16_UEP5_DMA = (uint16_t)(uint32_t)endpoint5_buffer;
+    R16_UEP3_DMA = (uint16_t)(uint32_t)notification_buffer;
+    R16_UEP5_DMA = (uint16_t)(uint32_t)notification_buffer;
     R16_UEP7_DMA = (uint16_t)(uint32_t)endpoint7_buffer;
 
     reset_endpoints();
@@ -557,6 +544,8 @@ void UsbDevice_Init(void)
     uart_rx_time = millis();
     uart_rx_event = UartBridge_GetRxEventCount();
     activity_count = 0;
+    rf_submitted_count = 0;
+    rf_completed_count = 0;
     hardware_init();
 }
 
@@ -671,7 +660,18 @@ uint8_t UsbDevice_RfWrite(const uint8_t *data, uint8_t length)
     memcpy(endpoint2_buffer + USB_PACKET_SIZE, data, length);
     R8_UEP2_T_LEN = length;
     R8_UEP2_CTRL = (R8_UEP2_CTRL & ~MASK_UEP_T_RES) | UEP_T_RES_ACK;
+    rf_submitted_count += length;
     return 1;
+}
+
+uint32_t UsbDevice_GetRfSubmittedCount(void)
+{
+    return rf_submitted_count;
+}
+
+uint32_t UsbDevice_GetRfCompletedCount(void)
+{
+    return rf_completed_count;
 }
 
 uint8_t UsbDevice_RfLineCoding(uint32_t *baud, uint8_t *stop_bits,
@@ -826,6 +826,7 @@ static void process_interrupts(void)
                     }
                     break;
                 case UIS_TOKEN_IN | 2:
+                    rf_completed_count += R8_UEP2_T_LEN;
                     R8_UEP2_CTRL = ((R8_UEP2_CTRL ^ RB_UEP_T_TOG) &
                                     ~MASK_UEP_T_RES) | UEP_T_RES_NAK;
                     activity_count++;

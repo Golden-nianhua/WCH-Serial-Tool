@@ -21,6 +21,7 @@ extern rfipTx_t gTxParam;
 static rf_transport_role_t current_role;
 static uint8_t usb_pending[64];
 static uint8_t usb_pending_length;
+static uint8_t usb_zlp_pending;
 
 typedef struct __attribute__((packed))
 {
@@ -52,6 +53,11 @@ typedef struct __attribute__((packed))
     uint16_t server_data;
     uint32_t uart_baud;
     uint32_t rf_uart_baud;
+    uint32_t uart_rx_bytes;
+    uint32_t uart_rx_drops;
+    uint32_t uart_line_errors;
+    uint32_t rf_uart_bytes;
+    uint32_t rf_errors;
 } remote_status_t;
 
 typedef struct __attribute__((packed))
@@ -81,7 +87,7 @@ static void remote_task(void)
 
         memset(info, 0, sizeof(*info));
         info->fw_minor = 4;
-        info->fw_patch = 7;
+        info->fw_patch = 15;
         info->hardware = 0x72;
         info->rf_ready = 1;
         info->protocol = CFG_PROTOCOL_VERSION;
@@ -111,6 +117,11 @@ static void remote_task(void)
         remote->rf_role = RF_TRANSPORT_UART_NODE;
         remote->uart_baud = UartBridge_GetBaud();
         remote->rf_uart_baud = RfTransport_GetUartBaud();
+        remote->uart_rx_bytes = UartBridge_GetRxEventCount();
+        remote->uart_rx_drops = UartBridge_GetRxDropCount();
+        remote->uart_line_errors = UartBridge_GetLineErrorCount();
+        remote->rf_uart_bytes = RfTransport_GetByteCount();
+        remote->rf_errors = RfTransport_GetErrorCount();
         RfTransport_GetPairStatus(&remote->paired, &remote->pair_state,
                                   &server_data);
         remote->server_data = server_data;
@@ -163,6 +174,7 @@ static uint8_t set_role(rf_transport_role_t role, uint8_t usb_active)
 
     current_role = role;
     usb_pending_length = 0;
+    usb_zlp_pending = 0;
 
     RFRole_Init();
     {
@@ -199,8 +211,13 @@ void RfTransport_Task(void)
     {
         if(usb_pending_length)
         {
-            if(UsbDevice_RfWrite(usb_pending, usb_pending_length))
+            uint8_t length = usb_pending_length;
+
+            if(UsbDevice_RfWrite(usb_pending, length))
+            {
                 usb_pending_length = 0;
+                usb_zlp_pending = length == sizeof(usb_pending);
+            }
         }
         else
         {
@@ -209,7 +226,15 @@ void RfTransport_Task(void)
             {
                 usb_pending_length = (uint8_t)length;
                 if(UsbDevice_RfWrite(usb_pending, usb_pending_length))
+                {
+                    usb_zlp_pending =
+                        usb_pending_length == sizeof(usb_pending);
                     usb_pending_length = 0;
+                }
+            }
+            else if(usb_zlp_pending && UsbDevice_RfWrite(usb_pending, 0))
+            {
+                usb_zlp_pending = 0;
             }
         }
     }
@@ -344,6 +369,29 @@ uint8_t RfTransport_GetRssi(int8_t *rssi)
 uint32_t RfTransport_GetUartBaud(void)
 {
     return RfUartPara.BaudRate;
+}
+
+uint32_t RfTransport_GetByteCount(void)
+{
+    if(current_role == RF_TRANSPORT_USB_RECEIVER)
+        return RF_RxGetByteCount();
+    if(current_role == RF_TRANSPORT_UART_NODE)
+        return RF_TxGetByteCount();
+    return 0;
+}
+
+uint32_t RfTransport_GetErrorCount(void)
+{
+    if(current_role == RF_TRANSPORT_USB_RECEIVER)
+        return RF_RxGetErrorCount();
+    if(current_role == RF_TRANSPORT_UART_NODE)
+        return RF_TxGetErrorCount();
+    return 0;
+}
+
+uint8_t RfTransport_GetPendingLength(void)
+{
+    return usb_pending_length;
 }
 
 uint8_t RfTransport_RemoteCommand(uint8_t command, const uint8_t *request,

@@ -47,6 +47,6 @@ uint8_t UART_RxQuery( void *buf, typeBufSize *len );
 void UART_SetBuad( uint32_t buad );
 void UART_SetConfig(uint32_t baud, uint8_t stop_bits, uint8_t parity, uint8_t data_bits);
 void UART_SetTimer( uint16_t ms );
-void UART_Send( char* data, uint16_t size);
+void UART_Send(const uint8_t *data, uint16_t size);
 
 #endif /* BLE_DIRECTTEST_APP_INCLUDE_UART_H */

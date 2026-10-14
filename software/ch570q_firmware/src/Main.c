@@ -17,6 +17,14 @@ typedef enum
 static app_mode_t app_mode;
 static uint32_t usb_wait_start;
 
+__INTERRUPT
+__HIGH_CODE
+void HardFault_Handler(void)
+{
+    SYS_ResetExecute();
+    while(1);
+}
+
 static void apply_saved_xtal_capacitance(void)
 {
     uint8_t capacitance;
@@ -103,7 +111,7 @@ int main(void)
 {
     R16_PIN_ALTERNATE &= ~RB_PIN_DEBUG_EN;
     HSECFG_Capacitance(HSECap_18p);
-    SetSysClock(CLK_SOURCE_HSE_PLL_100MHz);
+    SetSysClock(CLK_SOURCE_HSE_PLL_24MHz);
 
     timebase_init();
     led_init();

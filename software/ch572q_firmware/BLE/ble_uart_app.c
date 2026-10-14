@@ -1,44 +1,42 @@
 #include "CONFIG.h"
 
-#include "ble_config_service.h"
 #include "ble_device_info.h"
 #include "ble_uart_app.h"
 #include "ble_uart_service.h"
-#include "config_service.h"
 #include "uart_bridge.h"
 
 #define BLE_UART_START_EVENT       0x0001
 #define BLE_UART_SEND_EVENT        0x0002
 #define BLE_UART_READ_RSSI_EVENT   0x0004
-#define BLE_CONFIG_SEND_EVENT      0x0008
 #define BLE_UART_STATUS_EVENT      0x0010
+#define BLE_PARAM_UPDATE_EVENT     0x0020
 #define BLE_UART_RSSI_PERIOD       3200U
+#define BLE_PARAM_UPDATE_DELAY     6400U
 #define BLE_UART_ADV_INTERVAL      80U
-#define BLE_UART_PREFERRED_MIN_INTERVAL 8U
-#define BLE_UART_PREFERRED_MAX_INTERVAL 20U
+#define BLE_UART_PREFERRED_MIN_INTERVAL 6U
+#define BLE_UART_PREFERRED_MAX_INTERVAL 6U
 #define BLE_UART_ALLOWED_MIN_INTERVAL   6U
 #define BLE_UART_ALLOWED_MAX_INTERVAL   1000U
-#define BLE_UART_NOTIFY_MAX        (BLE_BUFF_MAX_LEN - 7U)
-#define BLE_UART_TX_PAUSE_FREE      256U
-#define BLE_UART_TX_RESUME_FREE     384U
+#define BLE_UART_NOTIFY_MAX         244U
+#define BLE_UART_RX_PACKET_MAX      (BLE_BUFF_MAX_LEN - 7U)
+#define BLE_UART_DATA_PACKETS_DUPLEX 2U
+#define BLE_UART_DATA_PACKETS_SINGLE 4U
+#define BLE_UART_DUPLEX_HOLD         MS1_TO_SYSTEM_TIME(100U)
+#define BLE_UART_TX_RESUME_FREE     BLE_UART_RX_PACKET_MAX
 
 static uint8_t task_id = INVALID_TASK_ID;
 static uint16_t connection_handle = GAP_CONNHANDLE_INIT;
 static uint8_t state = BLE_UART_STATE_STARTING;
 static int8_t connection_rssi;
 static uint8_t tx_power = BLE_TX_POWER;
-static uint8_t pending_data[BLE_UART_NOTIFY_MAX];
-static uint16_t pending_length;
 static uint8_t uart_pending_data[BLE_UART_NOTIFY_MAX];
 static uint16_t uart_pending_length;
 static uint8_t uart_send_scheduled;
-static uint8_t config_request[64];
-static uint8_t config_response[64];
-static uint8_t config_request_length;
-static uint8_t config_response_offset;
-static uint8_t config_response_pending;
 static uint8_t uart_ready = 1;
 static uint8_t uart_status_pending;
+static uint8_t uart_status_valid;
+static uint8_t ble_rx_seen;
+static uint32_t ble_rx_last_tick;
 
 static uint8_t scan_response[] = {
     0x10, GAP_ADTYPE_LOCAL_NAME_COMPLETE,
@@ -71,7 +69,6 @@ static void params_changed(uint16_t conn_handle, uint16_t interval,
                            uint16_t latency, uint16_t timeout);
 static uint8_t service_event(uint16_t conn_handle,
                              const ble_uart_evt_t *event);
-static void config_service_event(const uint8_t *data, uint16_t length);
 
 static gapRolesCBs_t role_callbacks = {
     state_changed,
@@ -106,8 +103,14 @@ static void start_advertising(void)
 
 static void schedule_uart_status(uint8_t ready)
 {
+    if(ready && uart_status_pending && !uart_ready)
+        return;
+    if(uart_status_valid && ready == uart_ready)
+        return;
+
     uart_ready = ready;
     uart_status_pending = 1;
+    uart_status_valid = 1;
     tmos_set_event(task_id, BLE_UART_STATUS_EVENT);
 }
 
@@ -146,7 +149,6 @@ void BleUart_Init(void)
     GATTServApp_AddService(GATT_ALL_SERVICES);
     BleDeviceInfo_Add();
     BleUartService_Add(service_event);
-    BleConfigService_Add(config_service_event);
     GGS_SetParameter(GGS_DEVICE_NAME_ATT,
                      GAP_DEVICE_NAME_LEN, device_name);
 
@@ -173,21 +175,26 @@ static uint8_t service_event(uint16_t conn_handle,
     if(event->type == BLE_UART_EVT_DATA_RECEIVED)
     {
         uint16_t free = UartBridge_TxFree();
+        uint8_t accepted = 0;
+
+        ble_rx_seen = 1;
+        ble_rx_last_tick = TMOS_GetSystemClock();
 
         if(uart_pending_length == 0U && free >= event->length)
         {
             (void)UartBridge_Write(event->data, event->length);
+            accepted = 1;
         }
         else if(uart_pending_length == 0U &&
                 event->length <= sizeof(uart_pending_data))
         {
             tmos_memcpy(uart_pending_data, event->data, event->length);
             uart_pending_length = event->length;
+            accepted = 1;
         }
 
-        schedule_uart_status(uart_pending_length == 0U &&
-                             UartBridge_TxFree() >=
-                             BLE_UART_TX_PAUSE_FREE);
+        if(!accepted || uart_pending_length != 0U)
+            schedule_uart_status(0);
     }
     else if(event->type == BLE_UART_EVT_TX_NOTI_ENABLED)
     {
@@ -228,37 +235,6 @@ static uint8_t service_event(uint16_t conn_handle,
     return 0;
 }
 
-static void config_service_event(const uint8_t *data, uint16_t length)
-{
-    uint8_t offset;
-    uint8_t payload_length;
-
-    if(length < 2U)
-        return;
-
-    offset = data[0];
-    payload_length = length - 1U;
-    if(offset == 0U)
-        config_request_length = 0;
-    if(offset != config_request_length ||
-       (uint16_t)offset + payload_length > sizeof(config_request))
-    {
-        config_request_length = 0;
-        return;
-    }
-
-    tmos_memcpy(config_request + offset, data + 1, payload_length);
-    config_request_length += payload_length;
-    if(config_request_length == sizeof(config_request))
-    {
-        ConfigService_ProcessPacket(config_request, config_response);
-        config_request_length = 0;
-        config_response_offset = 0;
-        config_response_pending = 1;
-        tmos_set_event(task_id, BLE_CONFIG_SEND_EVENT);
-    }
-}
-
 static void link_established(gapRoleEvent_t *event)
 {
     gapEstLinkReqEvent_t *link = (gapEstLinkReqEvent_t *)event;
@@ -272,15 +248,16 @@ static void link_established(gapRoleEvent_t *event)
     connection_handle = link->connectionHandle;
     state = BLE_UART_STATE_CONNECTED;
     connection_rssi = 0;
-    pending_length = 0;
     uart_pending_length = 0;
     uart_send_scheduled = 0;
-    config_request_length = 0;
-    config_response_pending = 0;
     uart_ready = 1;
     uart_status_pending = 0;
+    uart_status_valid = 0;
+    ble_rx_seen = 0;
     tmos_start_task(task_id, BLE_UART_READ_RSSI_EVENT,
                     BLE_UART_RSSI_PERIOD);
+    tmos_start_task(task_id, BLE_PARAM_UPDATE_EVENT,
+                    BLE_PARAM_UPDATE_DELAY);
 }
 
 static void link_terminated(gapRoleEvent_t *event)
@@ -292,17 +269,16 @@ static void link_terminated(gapRoleEvent_t *event)
 
     connection_handle = GAP_CONNHANDLE_INIT;
     state = BLE_UART_STATE_ADVERTISING;
-    pending_length = 0;
     uart_pending_length = 0;
     uart_send_scheduled = 0;
-    config_request_length = 0;
-    config_response_pending = 0;
     uart_status_pending = 0;
+    uart_status_valid = 0;
+    ble_rx_seen = 0;
     UartBridge_SetModem(0, 0);
     tmos_stop_task(task_id, BLE_UART_READ_RSSI_EVENT);
     tmos_stop_task(task_id, BLE_UART_SEND_EVENT);
     tmos_stop_task(task_id, BLE_UART_STATUS_EVENT);
-    tmos_stop_task(task_id, BLE_CONFIG_SEND_EVENT);
+    tmos_stop_task(task_id, BLE_PARAM_UPDATE_EVENT);
     while(UartBridge_ReadByte(&discarded))
     {
     }
@@ -351,101 +327,62 @@ static void params_changed(uint16_t conn_handle, uint16_t interval,
     (void)timeout;
 }
 
-static void send_notification(void)
+static void send_notifications(void)
 {
-    attHandleValueNoti_t notification;
-    uint16_t mtu_payload;
-    bStatus_t result;
+    uint8_t packets = 0;
+    uint8_t packet_limit = BLE_UART_DATA_PACKETS_SINGLE;
 
     uart_send_scheduled = 0;
     if(connection_handle == GAP_CONNHANDLE_INIT ||
        !BleUartService_NotifyReady(connection_handle))
         return;
 
-    if(pending_length == 0U)
+    if(uart_pending_length ||
+       (ble_rx_seen &&
+        (uint32_t)(TMOS_GetSystemClock() - ble_rx_last_tick) <
+        BLE_UART_DUPLEX_HOLD))
+        packet_limit = BLE_UART_DATA_PACKETS_DUPLEX;
+
+    while(packets < packet_limit)
     {
-        mtu_payload = ATT_GetMTU(connection_handle) - 3U;
-        if(mtu_payload > sizeof(pending_data))
-            mtu_payload = sizeof(pending_data);
-        while(pending_length < mtu_payload &&
-              UartBridge_ReadByte(&pending_data[pending_length]))
-        {
-            pending_length++;
-        }
-        if(pending_length == 0U)
+        attHandleValueNoti_t notification;
+        uint16_t length = UartBridge_Available();
+        uint16_t mtu_payload = ATT_GetMTU(connection_handle) - 3U;
+        bStatus_t result;
+
+        if(length == 0U)
             return;
+        if(mtu_payload > BLE_UART_NOTIFY_MAX)
+            mtu_payload = BLE_UART_NOTIFY_MAX;
+        if(length > mtu_payload)
+            length = mtu_payload;
+
+        notification.len = length;
+        notification.pValue = GATT_bm_alloc(connection_handle,
+                                             ATT_HANDLE_VALUE_NOTI,
+                                             length, NULL, 0);
+        if(!notification.pValue)
+        {
+            schedule_uart_send(2);
+            return;
+        }
+
+        notification.len = UartBridge_Peek(notification.pValue, length);
+        result = BleUartService_Notify(connection_handle, &notification);
+        if(result != SUCCESS)
+        {
+            GATT_bm_free((gattMsg_t *)&notification,
+                         ATT_HANDLE_VALUE_NOTI);
+            schedule_uart_send(2);
+            return;
+        }
+
+        UartBridge_Consume(length);
+        packets++;
     }
 
-    notification.len = pending_length;
-    notification.pValue = GATT_bm_alloc(connection_handle,
-                                         ATT_HANDLE_VALUE_NOTI,
-                                         pending_length, NULL, 0);
-    if(!notification.pValue)
-    {
-        schedule_uart_send(2);
-        return;
-    }
-
-    tmos_memcpy(notification.pValue, pending_data, pending_length);
-    result = BleUartService_Notify(connection_handle, &notification);
-    if(result != SUCCESS)
-    {
-        GATT_bm_free((gattMsg_t *)&notification, ATT_HANDLE_VALUE_NOTI);
-        schedule_uart_send(2);
-        return;
-    }
-
-    pending_length = 0;
     if(UartBridge_Available())
-        schedule_uart_send(2);
-}
-
-static void send_config_response(void)
-{
-    attHandleValueNoti_t notification;
-    uint16_t chunk_length;
-    uint16_t maximum_chunk;
-    bStatus_t result;
-
-    if(!config_response_pending ||
-       connection_handle == GAP_CONNHANDLE_INIT ||
-       !BleConfigService_NotifyReady(connection_handle))
-        return;
-
-    maximum_chunk = ATT_GetMTU(connection_handle) - 4U;
-    if(maximum_chunk > 19U)
-        maximum_chunk = 19U;
-    chunk_length = sizeof(config_response) - config_response_offset;
-    if(chunk_length > maximum_chunk)
-        chunk_length = maximum_chunk;
-
-    notification.len = chunk_length + 1U;
-    notification.pValue = GATT_bm_alloc(connection_handle,
-                                         ATT_HANDLE_VALUE_NOTI,
-                                         notification.len, NULL, 0);
-    if(!notification.pValue)
-    {
-        tmos_start_task(task_id, BLE_CONFIG_SEND_EVENT, 2);
-        return;
-    }
-
-    notification.pValue[0] = config_response_offset;
-    tmos_memcpy(notification.pValue + 1,
-                config_response + config_response_offset,
-                chunk_length);
-    result = BleConfigService_Notify(connection_handle, &notification);
-    if(result != SUCCESS)
-    {
-        GATT_bm_free((gattMsg_t *)&notification, ATT_HANDLE_VALUE_NOTI);
-        tmos_start_task(task_id, BLE_CONFIG_SEND_EVENT, 2);
-        return;
-    }
-
-    config_response_offset += chunk_length;
-    if(config_response_offset == sizeof(config_response))
-        config_response_pending = 0;
-    else
-        tmos_start_task(task_id, BLE_CONFIG_SEND_EVENT, 2);
+        schedule_uart_send(1);
 }
 
 static void send_uart_status(void)
@@ -490,9 +427,15 @@ static uint16_t process_event(uint8_t id, uint16_t events)
         return events ^ BLE_UART_START_EVENT;
     }
 
+    if(events & BLE_UART_STATUS_EVENT)
+    {
+        send_uart_status();
+        return events ^ BLE_UART_STATUS_EVENT;
+    }
+
     if(events & BLE_UART_SEND_EVENT)
     {
-        send_notification();
+        send_notifications();
         return events ^ BLE_UART_SEND_EVENT;
     }
 
@@ -507,16 +450,17 @@ static uint16_t process_event(uint8_t id, uint16_t events)
         return events ^ BLE_UART_READ_RSSI_EVENT;
     }
 
-    if(events & BLE_CONFIG_SEND_EVENT)
+    if(events & BLE_PARAM_UPDATE_EVENT)
     {
-        send_config_response();
-        return events ^ BLE_CONFIG_SEND_EVENT;
-    }
-
-    if(events & BLE_UART_STATUS_EVENT)
-    {
-        send_uart_status();
-        return events ^ BLE_UART_STATUS_EVENT;
+        if(connection_handle != GAP_CONNHANDLE_INIT)
+        {
+            GAPRole_PeripheralConnParamUpdateReq(
+                connection_handle,
+                BLE_UART_PREFERRED_MIN_INTERVAL,
+                BLE_UART_PREFERRED_MAX_INTERVAL,
+                0U, 100U, task_id);
+        }
+        return events ^ BLE_PARAM_UPDATE_EVENT;
     }
 
     return 0;
@@ -541,7 +485,7 @@ void BleUart_Poll(void)
 
     if(connection_handle != GAP_CONNHANDLE_INIT &&
        BleUartService_NotifyReady(connection_handle) &&
-       (pending_length || UartBridge_Available()))
+       UartBridge_Available())
     {
         schedule_uart_send(0);
     }

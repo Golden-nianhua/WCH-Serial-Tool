@@ -19,31 +19,35 @@ Runtime role selection:
 The RF receiver and RF node share the packet buffer and role memory. Only the
 selected role is initialized at runtime.
 
+RF payloads use the radio CRC, sequence numbers, acknowledgements and retry.
+The receiver acknowledges a UART payload only after it has been stored in the
+USB-bound queue. If that queue is full, the sequence is left pending so the RF
+node retransmits the same payload after the host drains the queue.
+
 ## UART baud rates
 
-EP1 accepts every rate up to 1 Mbaud. Above 1 Mbaud it accepts rates whose
-generated baud error is at most 2%, plus the requested 6 Mbaud and 12 Mbaud
-compatibility settings. Requests above 12 Mbaud are rejected by the CDC
-`SET_LINE_CODING` control request.
+EP1 accepts rates through 3 Mbaud when the generated UART baud error is at most
+2%. EP2 and the paired RF node are limited to 1.5 Mbaud. Unsupported rates are
+rejected by the CDC `SET_LINE_CODING` control request.
 
-The system clock remains fixed at 100 MHz in both USB receiver and RF node
+The system clock remains fixed at 24 MHz in both USB receiver and RF node
 modes. CDC baud-rate changes only update the UART divisor.
 
 | Requested | Generated UART baud |
 | ---: | ---: |
-| 12,000,000 | 12,500,000 |
-| 6,000,000 | 6,250,000 |
-| 3,000,000 | 3,125,000 |
-| 2,000,000 | 2,083,333 |
-| 1,500,000 | 1,562,500 |
-| 1,000,000 | 961,538 |
+| 3,000,000 | 3,000,000 |
+| 2,000,000 | unsupported |
+| 1,500,000 | 1,500,000 |
+| 1,000,000 | 1,000,000 |
 
-CH572 cannot generate exact 12 Mbaud or 6 Mbaud from its available system
-clock dividers. Those two compatibility settings have a +4.17% error.
+At 24 MHz, 3 Mbaud, 1.5 Mbaud and 1 Mbaud use exact integer divisors. 2 Mbaud
+cannot be generated within the 2% limit and is rejected.
 
-EP2 accepts rates up to 1.5 Mbaud. Higher rates are rejected by CDC. The RF
-node applies the selected UART divisor after the current RF transaction
-completes.
+EP2 rejects 3 Mbaud even though its divisor is exact: at the 24 MHz system clock,
+RF interrupt latency can overflow the CH572's eight-byte UART FIFO. Full-duplex
+1.5 Mbaud has been verified with one MiB per direction. The RF node applies the
+selected UART divisor after the current RF transaction completes; the UART
+setting does not increase the 2.4 GHz link's payload throughput.
 
 ## Vendor configuration protocol
 
@@ -94,7 +98,7 @@ The TX-power and HSE-capacitance settings share the reserved flash page at
 ## HSE calibration
 
 The 32 MHz crystal load can be selected from 6 pF through 20 pF in 2 pF steps.
-While USB is configured, the firmware measures 100 MHz SysTick counts against
+While USB is configured, the firmware measures 24 MHz SysTick counts against
 the host's 1 ms USB SOF reference. A temporary setting does not write flash;
 only an explicit save changes the value restored at the next boot.
 

@@ -31,6 +31,9 @@ uint8_t RfTransport_LoadXtalCap(uint8_t *value);
 uint8_t RfTransport_SaveXtalCap(uint8_t value);
 uint8_t RfTransport_GetRssi(int8_t *rssi);
 uint32_t RfTransport_GetUartBaud(void);
+uint32_t RfTransport_GetByteCount(void);
+uint32_t RfTransport_GetErrorCount(void);
+uint8_t RfTransport_GetPendingLength(void);
 uint8_t RfTransport_RemoteCommand(uint8_t command, const uint8_t *request,
                                   uint8_t request_length, uint8_t *status,
                                   uint8_t *response,

@@ -196,12 +196,12 @@ static bStatus_t write_attribute(uint16_t conn_handle,
             return ATT_ERR_ATTR_NOT_LONG;
         if(length == 0U || length > sizeof(config_response))
             return ATT_ERR_INVALID_VALUE_SIZE;
+        if(app_callback && app_callback(conn_handle, &event) != SUCCESS)
+            return ATT_ERR_INVALID_VALUE;
 
         tmos_memcpy(config_response, value, length);
         config_response[0] |= 0x80U;
         config_response_length = length;
-        if(app_callback)
-            (void)app_callback(conn_handle, &event);
         return SUCCESS;
     }
 

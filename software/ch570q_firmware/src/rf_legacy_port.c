@@ -130,7 +130,7 @@ uint8_t UART_RxQuery(void *buf, typeBufSize *len)
 }
 
 __HIGH_CODE
-void UART_Send(char *data, uint16_t size)
+void UART_Send(const uint8_t *data, uint16_t size)
 {
     uint16_t index = 0;
 

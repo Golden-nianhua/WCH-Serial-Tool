@@ -13,6 +13,7 @@
 /******************************************************************************/
 /* 头文件包含 */
 #include "HAL.h"
+#include "mode_memory.h"
 
 tmosTaskID halTaskID;
 uint32_t g_LLE_IRQLibHandlerLocation;
@@ -81,7 +82,8 @@ void CH57x_BLEInit(void)
     g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler;
     PFIC_SetPriority(BLEL_IRQn, 0xF0);
     tmos_memset(&cfg, 0, sizeof(bleConfig_t));
-    cfg.MEMAddr = (uint32_t)MEM_BUF;
+    tmos_memset(mode_memory, 0, BLE_MEMHEAP_SIZE);
+    cfg.MEMAddr = (uint32_t)mode_memory;
     cfg.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
     cfg.BufMaxLen = (uint32_t)BLE_BUFF_MAX_LEN;
     cfg.BufNumber = (uint32_t)BLE_BUFF_NUM;

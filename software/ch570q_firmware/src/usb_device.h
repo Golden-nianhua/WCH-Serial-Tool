@@ -16,6 +16,8 @@ uint8_t UsbDevice_VendorRead(uint8_t *data, uint8_t capacity);
 uint8_t UsbDevice_VendorWrite(const uint8_t *data, uint8_t length);
 uint8_t UsbDevice_RfRead(uint8_t *data, uint8_t capacity);
 uint8_t UsbDevice_RfWrite(const uint8_t *data, uint8_t length);
+uint32_t UsbDevice_GetRfSubmittedCount(void);
+uint32_t UsbDevice_GetRfCompletedCount(void);
 uint8_t UsbDevice_RfLineCoding(uint32_t *baud, uint8_t *stop_bits,
                                uint8_t *parity, uint8_t *data_bits,
                                uint8_t *io_status);

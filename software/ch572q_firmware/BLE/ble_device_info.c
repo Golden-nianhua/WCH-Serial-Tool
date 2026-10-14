@@ -1,4 +1,5 @@
 #include "ble_device_info.h"
+#include "app_handoff.h"
 
 #define FLASH_CONST __attribute__((section(".rodata")))
 
@@ -104,14 +105,14 @@ static gattServiceCBs_t callbacks = {
 bStatus_t BleDeviceInfo_Add(void)
 {
     static const uint8_t hex[] = "0123456789ABCDEF";
-    __attribute__((aligned(4))) uint8_t mac[8];
     uint8_t index;
 
-    GetMACAddress(mac);
     for(index = 0; index < 6U; index++)
     {
-        serial[index * 2U] = hex[mac[index] >> 4];
-        serial[index * 2U + 1U] = hex[mac[index] & 0x0fU];
+        uint8_t value = app_handoff.mac[5U - index];
+
+        serial[index * 2U] = hex[value >> 4];
+        serial[index * 2U + 1U] = hex[value & 0x0fU];
     }
 
     return GATTServApp_RegisterService(attributes,

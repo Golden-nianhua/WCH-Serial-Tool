@@ -3,7 +3,7 @@ name = "wch-serial-cli"
 version = "0.1.0"
 description = "WCH Serial Tool USB and BLE configuration CLI"
 requires-python = ">=3.11"
-dependencies = ["bleak>=0.22"]
+dependencies = ["bleak>=0.22", "pyserial>=3.5"]
 
 [tool.uv]
 package = false

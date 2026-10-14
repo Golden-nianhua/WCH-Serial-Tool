@@ -1,10 +1,14 @@
 ENTRY( _boot_start )
 
+__app_origin = DEFINED(APP_ORIGIN) ? APP_ORIGIN : 0x00002000;
+__app_length = DEFINED(APP_LENGTH) ? APP_LENGTH : 224K;
+
 MEMORY
 {
 	BOOT (rx) : ORIGIN = 0x00000000, LENGTH = 8K
-	FLASH (rx) : ORIGIN = 0x00002000, LENGTH = 224K
-	RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 12K
+	FLASH (rx) : ORIGIN = __app_origin, LENGTH = __app_length
+	RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 0x2FF0
+	HANDOFF (rw) : ORIGIN = 0x20002FF0, LENGTH = 16
 }
 
 SECTIONS
@@ -166,6 +170,13 @@ SECTIONS
 		. = ALIGN(4);
 		PROVIDE( _ebss = .);
 	} >RAM AT>FLASH
+
+	.handoff (NOLOAD) :
+	{
+		. = ALIGN(4);
+		KEEP(*(.handoff))
+		. = ALIGN(4);
+	} >HANDOFF
 
 	PROVIDE( _end = _ebss);
 	PROVIDE( end = . );

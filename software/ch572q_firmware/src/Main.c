@@ -1,25 +1,21 @@
 #include "CONFIG.h"
-#include "HAL.h"
 
-#include "ble_uart_app.h"
+#include "app_handoff.h"
 #include "config_service.h"
 #include "device_config.h"
+#include "mode_memory.h"
 #include "uart_bridge.h"
 #include "usb_device.h"
 
 #define LED_PIN (1U << 7)
 #define USB_ENUMERATION_WAIT_MS 500U
 
-typedef enum
-{
-    APP_USB_WAIT = 0,
-    APP_USB_CONFIG,
-    APP_BLE_UART
-} app_mode_t;
+__attribute__((aligned(4)))
+uint32_t mode_memory[MODE_MEMORY_SIZE / sizeof(uint32_t)];
 
-__attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
+__attribute__((section(".handoff"), aligned(4)))
+volatile app_handoff_t app_handoff;
 
-static app_mode_t app_mode;
 static uint32_t usb_wait_start;
 static uint32_t usb_wait_activity;
 static uint8_t usb_host_seen;
@@ -64,23 +60,34 @@ static void led_task(void)
         activity_time = now;
     }
 
-    if((uint32_t)(now - activity_time) < 40U)
+    if((uint32_t)(now - activity_time) < 40U ||
+       UsbDevice_IsConfigured())
         led_write(1);
-    else if(app_mode == APP_USB_WAIT)
-        led_write(((now / 100U) & 1U) == 0U);
-    else if(app_mode == APP_USB_CONFIG)
-        led_write(1);
-    else if(BleUart_IsConnected())
-        led_write((now % 1000U) < 60U);
     else
-        led_write(((now / 250U) & 1U) == 0U);
+        led_write(((now / 100U) & 1U) == 0U);
+}
+
+static void start_ble_app(void)
+{
+    uint8_t mac[8] __attribute__((aligned(4)));
+    uint8_t index;
+
+    GetMACAddress(mac);
+    for(index = 0; index < sizeof(app_handoff.mac); index++)
+        app_handoff.mac[5U - index] = mac[index];
+    app_handoff.check = ~BLE_APP_MAGIC;
+    app_handoff.magic = BLE_APP_MAGIC;
+
+    UsbDevice_Disable();
+    SYS_ResetExecute();
+    while(1);
 }
 
 int main(void)
 {
     R16_PIN_ALTERNATE &= ~RB_PIN_DEBUG_EN;
     HSECFG_Capacitance(HSECap_18p);
-    SetSysClock(CLK_SOURCE_HSE_PLL_100MHz);
+    SetSysClock(CLK_SOURCE_HSE_PLL_24MHz);
 
     timebase_init();
     led_init();
@@ -90,17 +97,15 @@ int main(void)
     UartBridge_Init();
     UsbDevice_Init();
     ConfigService_Init();
-    app_mode = APP_USB_WAIT;
     usb_wait_start = millis();
     usb_wait_activity = UsbDevice_GetActivityCount();
     usb_host_seen = 0;
 
     while(1)
     {
-        if(app_mode != APP_BLE_UART)
-            UsbDevice_Task();
+        UsbDevice_Task();
 
-        if(app_mode == APP_USB_WAIT)
+        if(!UsbDevice_IsConfigured())
         {
             uint32_t activity = UsbDevice_GetActivityCount();
 
@@ -110,31 +115,12 @@ int main(void)
                 usb_wait_start = millis();
                 usb_host_seen = 1;
             }
-            if(UsbDevice_IsConfigured())
-            {
-                app_mode = APP_USB_CONFIG;
-            }
-            else if(!usb_host_seen &&
-                    (uint32_t)(millis() - usb_wait_start) >=
-                    USB_ENUMERATION_WAIT_MS)
-            {
-                UsbDevice_Disable();
-                UartBridge_ModemInit();
-                CH57x_BLEInit();
-                HAL_Init();
-                GAPRole_PeripheralInit();
-                BleUart_Init();
-                BleUart_SetTxPower(DeviceConfig_GetTxPower());
-                app_mode = APP_BLE_UART;
-            }
+            if(!usb_host_seen &&
+               (uint32_t)(millis() - usb_wait_start) >=
+               USB_ENUMERATION_WAIT_MS)
+                start_ble_app();
         }
 
-        if(app_mode == APP_BLE_UART)
-        {
-            TMOS_SystemProcess();
-            UartBridge_Task();
-            BleUart_Poll();
-        }
         ConfigService_Task();
         led_task();
     }

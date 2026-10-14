@@ -389,7 +389,7 @@ def show_info(device, remote=False):
 
 def show_status(device, remote=False):
     data = target_command(device, CMD_GET_STATUS, remote)
-    configured, rf_ready, role, paired, state, _, server, uart_baud, rf_baud = struct.unpack(
+    configured, rf_ready, role, paired, state, _, server, uart_baud, rf_baud = struct.unpack_from(
         "<6BHII", data
     )
     print(f"USB configured: {'yes' if configured else 'no'}")
@@ -400,6 +400,24 @@ def show_status(device, remote=False):
     print(f"server data: 0x{server:04X}")
     print(f"physical UART baud: {uart_baud}")
     print(f"{'BLE' if role == 3 else 'RF'} UART baud: {rf_baud}")
+    if len(data) >= 36:
+        uart_bytes, uart_drops, line_errors, rf_bytes, rf_errors = struct.unpack_from(
+            "<5I", data, 16
+        )
+        print(f"UART RX bytes: {uart_bytes}")
+        print(f"UART RX drops: {uart_drops}")
+        print(f"UART line errors: {line_errors}")
+        print(f"RF UART bytes: {rf_bytes}")
+        print(f"RF flow errors: {rf_errors}")
+    if len(data) >= 48:
+        submitted, completed, queue_depth, rf_state, pending = struct.unpack_from(
+            "<IIHBB", data, 36
+        )
+        print(f"USB RF submitted: {submitted}")
+        print(f"USB RF completed: {completed}")
+        print(f"RF queue depth: {queue_depth}")
+        print(f"RF data state: {rf_state}")
+        print(f"USB pending length: {pending}")
 
 
 def show_pair_status(device):

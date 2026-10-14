@@ -28,7 +28,7 @@
 #define gRxDataStatus  slaveRxDataStatus
 #define pRfBuf         slaveRfBuf
 #define rf_buf         rf_role_buf
-#define rf_buffer      slaveRfBuffer
+#define rf_buffer      rf_role_stream_buffer
 #define rfCBs          slaveRfCBs
 #define gBaudRate      slaveBaudRate
 #define scanDevices    rf_role_control.scan_devices
@@ -38,9 +38,11 @@
  * GLOBAL TYPEDEFS
  */
 extern uint8_t rf_role_buf[RF_BUF_LEN];
+extern struct simple_buf rf_buffer;
 static struct simple_buf *pRfBuf = NULL;
-static struct simple_buf rf_buffer;
 uint32_t gBaudRate;
+static uint32_t rfRxByteCount;
+static uint32_t rfRxErrorCount;
 
 extern rfTxBuf_t rf_role_tx_buf;
 uint32_t gSysClock;
@@ -126,7 +128,7 @@ static void scan_record(const bound_req_t *request, int8_t rssi)
 }
 
 // GAP Service Callbacks
-rfStatusCBs_t rfCBs =
+static const rfStatusCBs_t rfCBs =
 {
     rfProcessRx,
     rfProcessTx,
@@ -398,20 +400,31 @@ static void rfProcessRx( rfPackage_t *pPkt )
             gRfStatus = RF_STATUS_TX;
             if( pPkt->seq == gDataSeq )
             {
-                typeBufSize len = pPkt->length;
-                len -= PKT_DATA_OFFSET;
-                write_buf( pRfBuf, (pPkt+1), &len );
+                typeBufSize packet_len = pPkt->length - PKT_DATA_OFFSET;
+                typeBufSize stored_len = packet_len;
+                typeBufSize response_len = DATA_LEN_MAX_TX;
+
+                write_buf( pRfBuf, (pPkt+1), &stored_len );
+                if( stored_len != packet_len )
+                {
+                    /* Do not acknowledge data that was not queued.  The
+                     * transmitter keeps the same sequence and retries it. */
+                    gRfStatus = RF_STATUS_WAIT;
+                    rfRxErrorCount++;
+                    return;
+                }
+                rfRxByteCount += packet_len;
                 gRxDataStatus = DATA_STATUS_RCV;
                 // ������ջ���������ᶪ����
-                len = DATA_LEN_MAX_TX;
                 pPkt_t->type = PKT_DATA_RSP_ACK;
-                if( gBoundStatus == BOUND_STATUS_EST && !USB_RfRxQuery( pRsp_t->other.rspData, &len ) )
+                if( gBoundStatus == BOUND_STATUS_EST &&
+                    !USB_RfRxQuery( pRsp_t->other.rspData, &response_len ) )
                 {
-                    pPkt_t->length = PKT_DATA_OFFSET+1+len;
+                    pPkt_t->length = PKT_DATA_OFFSET+1+response_len;
                     pRsp_t->opcode = OPCODE_DATA;
                     pPkt_t->seq = gDataSeq;
                     pPkt_t->resv = 0;
-                    gRfTxCount += len;
+                    gRfTxCount += response_len;
                 }
                 else
                 {
@@ -525,8 +538,6 @@ static void rfProcessTimeout( void )
 __HIGH_CODE
 uint8_t RF_RxQuery( void *buf, typeBufSize *len )
 {
-    uint8_t *p;
-
     if( gRxDataStatus == DATA_STATUS_RCV )
     {
         if( read_buf( pRfBuf, buf, len ) == 0 )
@@ -553,6 +564,26 @@ uint8_t RF_RxQuery( void *buf, typeBufSize *len )
     return *len;
 }
 
+uint32_t RF_RxGetByteCount(void)
+{
+    return rfRxByteCount;
+}
+
+uint32_t RF_RxGetErrorCount(void)
+{
+    return rfRxErrorCount;
+}
+
+uint16_t RF_RxGetQueueDepth(void)
+{
+    return pRfBuf ? pRfBuf->data_len : 0;
+}
+
+uint8_t RF_RxGetDataStatus(void)
+{
+    return gRxDataStatus;
+}
+
 /*******************************************************************************
  * @fn      RF_UartTxInit
  *
@@ -563,9 +594,10 @@ uint8_t RF_RxQuery( void *buf, typeBufSize *len )
  * @return  None.
  */
 
-__HIGH_CODE
 void RF_UartRxInit( void )
 {
+    rfRxByteCount = 0;
+    rfRxErrorCount = 0;
     scanActive = 0;
     scanCount = 0;
     scanTargetValid = 0;
