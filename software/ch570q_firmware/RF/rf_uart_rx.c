@@ -295,7 +295,11 @@ static void rfProcessRx( rfPackage_t *pPkt )
                     gRfStatus = RF_STATUS_TXRSP;
                     // �����´λ����������Ϣ
                     gDataSeq = 0;
-                    gServerData = rf_rand16( rssi );
+                    /* A lost reconnect response must not invalidate the ID
+                     * still held by the node. Only first pairing creates it. */
+                    gServerData = pReq_t->severData;
+                    if(!gServerData)
+                        gServerData = rf_rand16(rssi) | 1U;
                     pPkt_t->type = PKT_CMD_BOUND_RSP;
                     pPkt_t->length = PKT_DATA_OFFSET+sizeof(bound_rsp_t);
                     pPkt_t->seq = gDataSeq;
@@ -538,30 +542,31 @@ static void rfProcessTimeout( void )
 __HIGH_CODE
 uint8_t RF_RxQuery( void *buf, typeBufSize *len )
 {
-    if( gRxDataStatus == DATA_STATUS_RCV )
+    if(pRfBuf->data_len)
     {
-        if( read_buf( pRfBuf, buf, len ) == 0 )
-        {
-            PFIC_DisableIRQ(BLEL_IRQn);
+        PFIC_DisableIRQ(BLEL_IRQn);
+        read_buf(pRfBuf, buf, len);
+        if(!pRfBuf->data_len && gRxDataStatus == DATA_STATUS_RCV)
             gRxDataStatus = DATA_STATUS_START;
-            PFIC_EnableIRQ(BLEL_IRQn);
-        }
-    }
-    else if( gRxDataStatus == DATA_STATUS_TIMEOUT )
-    {
-        *len = 0;
-        rf_disconnect( );
+        PFIC_EnableIRQ(BLEL_IRQn);
     }
     else
     {
         *len = 0;
-        if( gRfStatus == RF_STATUS_WAIT )
-        {
-            gRfStatus = RF_STATUS_RX;
-            rf_rx_start( gIntervalTimer );
-        }
     }
     return *len;
+}
+
+void RF_UartRxPoll(void)
+{
+    /* Link recovery must run even when USB IN is waiting for the host. */
+    if(gRxDataStatus == DATA_STATUS_TIMEOUT)
+        rf_disconnect();
+    if(gRfStatus == RF_STATUS_WAIT)
+    {
+        gRfStatus = RF_STATUS_RX;
+        rf_rx_start(gIntervalTimer);
+    }
 }
 
 uint32_t RF_RxGetByteCount(void)

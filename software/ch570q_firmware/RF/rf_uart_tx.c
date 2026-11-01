@@ -118,7 +118,7 @@ static __attribute__((noinline)) void remote_receive_request(
 static __attribute__((noinline)) uint8_t remote_prepare_response(
     rfPackage_t *packet)
 {
-    if(!remoteResponseReady || !gBoundStatus)
+    if(!remoteResponseReady || gBoundStatus != BOUND_STATUS_EST)
         return 0;
 
     gRfStatus = RF_STATUS_GETS;
@@ -178,6 +178,7 @@ static void rf_disconnect( void )
 {
     gBoundStatus = BOUND_STATUS_IDLE;
     rssiValid = 0;
+    getDataProbe = 0;
     UART_SetTimer( ADV_INTERVAL );
     rf_tx_set_sync_word( AA );
     rf_tx_set_frequency( DEF_FREQUENCY );
@@ -453,7 +454,10 @@ void RF_StatusQuery( void )
         }
 
         gTxBuf.len  = DATA_LEN_MAX_TX;
-        s = UART_RxQuery( (void *)(pPkt_t+1), &gTxBuf.len );
+        if(gBoundStatus == BOUND_STATUS_EST)
+            s = UART_RxQuery((void *)(pPkt_t+1), &gTxBuf.len);
+        else
+            s = UART_StatusDue() ? 0x80 : 0xff;
         // ��������
         if( s == 0 )
         {

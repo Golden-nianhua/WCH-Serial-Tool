@@ -46,6 +46,7 @@ typedef union
 extern rf_role_control_t rf_role_control;
 
 void RF_UartRxInit( void );
+void RF_UartRxPoll(void);
 uint8_t RF_RxQuery( void *buf, typeBufSize *len );
 uint32_t RF_RxGetByteCount(void);
 uint32_t RF_RxGetErrorCount(void);

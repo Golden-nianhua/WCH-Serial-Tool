@@ -24,6 +24,34 @@ The receiver acknowledges a UART payload only after it has been stored in the
 USB-bound queue. If that queue is full, the sequence is left pending so the RF
 node retransmits the same payload after the host drains the queue.
 
+## RF reconnection
+
+After a link timeout, both roles return to the common access address and
+discovery channel. The node sends a bound request every 20 ms while idle.
+An already paired node supplies its previous `serverData`; the receiver
+accepts a matching ID without the first-pairing RSSI threshold. Reconnection
+preserves this ID, so losing a bound response does not invalidate later
+requests from the same node. A new ID is generated only for first pairing.
+
+The receiver services RF timeout and receive-rearm states on every main-loop
+iteration, independently of USB IN availability. Already acknowledged bytes
+remain queued across RF recovery. Before the node reaches the established
+state, bound requests and connection confirmation take priority over UART
+payloads, including when UART input is continuous.
+
+The state-machine regression test compiles the actual RF, transport and UART
+polling C sources with mocked hardware, then runs them under RISC-V emulation.
+It covers a lost reconnect response at weak RSSI, mismatched peer IDs, blocked
+USB IN, preservation of queued bytes and continuous UART input during recovery:
+
+```powershell
+uv run --with unicorn --with pyelftools tests/rf_reconnect_test.py
+```
+
+The test requires WCH GCC12 (auto-detected in MounRiver Studio 2/3); pass
+`--toolchain <bin-directory>` for another installation. Hardware distance and
+packet-loss testing is still required to validate RF behavior on the board.
+
 ## UART baud rates
 
 EP1 accepts rates through 3 Mbaud when the generated UART baud error is at most

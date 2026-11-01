@@ -167,7 +167,7 @@ void ConfigService_Task(void)
     else if(packet.command == CFG_CMD_GET_INFO)
     {
         app_info_t info = {
-            0, 4, 15, 0x72, 2, 1, CFG_PROTOCOL_VERSION,
+            0, 4, 16, 0x72, 2, 1, CFG_PROTOCOL_VERSION,
             CFG_FIRMWARE_RF_UART,
             GetSysClock(), IAP_APP_START, IAP_APP_END,
             R8_CHIP_ID, (R8_GLOB_CFG_INFO & RB_CFG_BOOT_EN) != 0,

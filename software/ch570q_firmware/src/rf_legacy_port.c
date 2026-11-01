@@ -93,6 +93,17 @@ void UART_SetConfig(uint32_t baud, uint8_t stop_bits,
 }
 
 __HIGH_CODE
+uint8_t UART_StatusDue(void)
+{
+    uint32_t now = SysTick->CNTL;
+
+    if((int32_t)(now - next_status_tick) < 0)
+        return 0;
+    next_status_tick = now + (uint32_t)status_period_ms * TICKS_PER_MS;
+    return 1;
+}
+
+__HIGH_CODE
 uint8_t UART_RxQuery(void *buf, typeBufSize *len)
 {
     uint32_t now = SysTick->CNTL;
@@ -118,9 +129,8 @@ uint8_t UART_RxQuery(void *buf, typeBufSize *len)
         return 0;
     }
 
-    if((int32_t)(now - next_status_tick) >= 0)
+    if(UART_StatusDue())
     {
-        next_status_tick = now + (uint32_t)status_period_ms * TICKS_PER_MS;
         *len = 0;
         return 0x80;
     }

@@ -87,7 +87,7 @@ static void remote_task(void)
 
         memset(info, 0, sizeof(*info));
         info->fw_minor = 4;
-        info->fw_patch = 15;
+        info->fw_patch = 16;
         info->hardware = 0x72;
         info->rf_ready = 1;
         info->protocol = CFG_PROTOCOL_VERSION;
@@ -209,6 +209,7 @@ void RfTransport_Task(void)
 {
     if(current_role == RF_TRANSPORT_USB_RECEIVER)
     {
+        RF_UartRxPoll();
         if(usb_pending_length)
         {
             uint8_t length = usb_pending_length;
